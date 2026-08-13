@@ -1,0 +1,66 @@
+# TicketPlus 購票助手設定
+# 複製此檔為 config.yaml 後再修改
+
+# ==================== 票券設定 ====================
+ticket:
+  # 開發測試：音田雅則（已開賣、全區）
+  activity_url: "https://ticketplus.com.tw/activity/4b47b5360d42451f65704664c40b1c72"
+  target_session: ""
+  quantity: 1
+  area_priorities:
+    - "全區"
+    - "預售票"
+  session_exclude_keywords: []
+  exclusive_code: ""
+  # 優先票區沒票時，是否改買畫面上第一個可購。false=持續刷到優先票區有票
+  fallback_first_available: false
+  # 開賣與否改看購票頁票區欄位：顯示開賣時間=未開賣；可選數量或已售完=已開賣
+
+  # ---- 正式目標：INFINITE RALLY V（搶票前改成下面這組）----
+  # activity_url: "https://ticketplus.com.tw/activity/af39103d211724c82069c4ab5e40e95c"
+  # target_session: "9/19"          # 或 "9/20"
+  # quantity: 2                     # 遠傳優先購每序號限 2 張；一般販售每場次限 4 張
+  # area_priorities:
+  #   - "VIP3區"
+  #   - "VIP4區"
+  # exclusive_code: ""              # 遠傳 / friDay 優先購序號
+
+# ==================== 帳號（被登出時自動重登；已登入則略過）====================
+account:
+  mobile: ""
+  password: ""
+  country_code: "+886"
+
+# ==================== 瀏覽器設定 ====================
+browser:
+  driver_path: ""
+  headless: false
+  page_load_timeout: 30
+  element_timeout: 8
+  window_width: 1280
+  window_height: 900
+  # 保留登入狀態；刪除此資料夾即可重登
+  user_data_dir: ".chrome-profile"
+  # 接上已開啟的 Windows Chrome，例如 127.0.0.1:9222
+  debugger_address: ""
+  chrome_binary: ""
+  # 在 WSL 時自動改開 Windows Chrome，不要用 Linux 內建瀏覽器
+  prefer_windows_chrome: true
+
+# ==================== 執行設定 ====================
+bot:
+  # 刷新間隔（毫秒）。過低容易被流量控管
+  refresh_interval: 500
+  max_retries: 300
+  auto_agree: true
+  sound_notification: true
+  # 遇到 reCAPTCHA / 3D 驗證時暫停，等你手動完成
+  wait_for_human: true
+
+# ==================== 日誌設定 ====================
+logging:
+  level: "INFO"
+  file_path: "logs/bot.log"
+  console_output: true
+  max_file_size: 10
+  backup_count: 5
