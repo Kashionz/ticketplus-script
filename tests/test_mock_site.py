@@ -16,6 +16,10 @@ def test_mock_server_serves_activity_and_order(tmp_path):
         assert "更新票數" in script
         assert "已售完" in script
         assert SESSION_919 in script
+        assert "order-code-row" in script
+        assert 'data-act="serial"' in script
+        assert "電腦選位" in script
+        assert "need-serial" in script
         order = urlopen(f"{origin}/order/{EVENT_ID}/{SESSION_919}?scenario=presale", timeout=5).read().decode("utf-8")
         assert "id=\"app\"" in order
         health = urlopen(f"{origin}/api/health", timeout=5).read().decode("utf-8")

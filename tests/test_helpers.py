@@ -8,11 +8,13 @@ from src.utils.helpers import (
     extract_session_id,
     is_activity_url,
     is_confirm_url,
+    is_login_url,
     is_mock_url,
     is_order_url,
     is_payment_url,
     is_success_url,
     keyword_matches,
+    normalize_mobile,
     normalize_text,
 )
 
@@ -44,6 +46,8 @@ def test_url_kind_helpers():
     checkout = f"https://ticketplus.com.tw/checkout/{TEST_EVENT}/abc"
     done = "https://ticketplus.com.tw/done/order123"
     assert is_activity_url(activity)
+    assert is_login_url("https://ticketplus.com.tw/login")
+    assert not is_login_url(activity)
     assert not is_order_url(activity)
     assert is_order_url(order)
     assert is_confirm_url(confirm)
@@ -83,6 +87,13 @@ def test_area_keyword_matches_nested_zones():
 
 def test_normalize_text():
     assert normalize_text("VIP 3 區") == "vip3區"
+
+
+def test_normalize_mobile_taiwan():
+    assert normalize_mobile("0912345678") == "0912345678"
+    assert normalize_mobile("912345678") == "0912345678"
+    assert normalize_mobile("+886912345678") == "0912345678"
+    assert normalize_mobile("886-912-345-678") == "0912345678"
 
 
 def test_ticket_config_validate_ok():

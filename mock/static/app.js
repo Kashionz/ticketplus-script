@@ -400,10 +400,7 @@
   function renderOrder(session) {
     const trees = AREA_TREE.map((g) => renderArea(g, true)).join("");
     const nextDisabled = canNextOrder() ? "" : "disabled";
-    const serial = needSerial()
-      ? `<div class="exclusive-code"><label class="label">購票序號</label>
-           <input type="text" value="${state.serial}" data-act="serial" placeholder="請輸入序號"></div>`
-      : "";
+    const serialValue = String(state.serial || "").replace(/"/g, "&quot;");
     return `
       ${header()}
       <main class="v-main">
@@ -424,10 +421,12 @@
         <div class="cus-container seats-area">
           <div class="seats-title">票區一覽</div>
           <div class="v-expansion-panels">${trees}</div>
-          ${serial}
-          <div class="seat-mode">電腦選位</div>
+          <div class="order-code-row">
+            <input type="text" value="${serialValue}" data-act="serial" autocomplete="off">
+          </div>
           <label class="agree-row"><input type="checkbox" data-act="agree" ${state.agreed ? "checked" : ""}> 我已閱讀並同意注意事項</label>
           <div class="order-footer">
+            <div class="seat-mode">電腦選位</div>
             <button type="button" class="ghost">清除選擇</button>
             <button type="button" class="nextBtn ${canNextOrder() ? "" : "disabledBtn"}" ${nextDisabled} data-act="order-next"><span class="v-btn__content">下一步</span></button>
           </div>
@@ -519,6 +518,7 @@
     const showLogin = !state.loggedIn && (route.name === "login" || params.get("login") === "1");
     let body = "";
     if (showLogin || route.name === "login") body = loginForm();
+    else if (route.name === "order" && state.scenario === "need-login" && !state.loggedIn) body = loginForm();
     else if (route.name === "order") body = renderOrder(session);
     else if (route.name === "confirmseat") body = renderConfirmSeat(session);
     else if (route.name === "confirm") body = renderConfirm(session);
@@ -622,6 +622,10 @@
           return;
         }
         if (act === "buy") {
+          if (state.scenario === "need-login" && !state.loggedIn) {
+            go(`/login${location.search}`);
+            return;
+          }
           go(`/order/${EVENT_ID}/${el.dataset.sid}${location.search}`);
           return;
         }

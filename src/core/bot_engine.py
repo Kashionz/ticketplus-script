@@ -13,7 +13,14 @@ from ..models.ticket_config import TicketConfig
 from ..pages.activity_page import ActivityPage
 from ..pages.login_page import LoginPage
 from ..pages.order_page import OrderPage
-from ..utils.helpers import is_activity_url, is_confirm_url, is_mock_url, is_order_url, is_payment_url
+from ..utils.helpers import (
+    is_activity_url,
+    is_confirm_url,
+    is_login_url,
+    is_mock_url,
+    is_order_url,
+    is_payment_url,
+)
 from .browser import BrowserManager
 
 logger = logging.getLogger("ticketplus")
@@ -169,8 +176,10 @@ class BotEngine:
 
     def start(self) -> bool:
         if self.is_running:
-            self._log("已經在執行中", "WARNING")
-            return False
+            if self.has_browser:
+                self._log("已經在執行中", "WARNING")
+                return False
+            self.stop(close_browser=True)
         errors = self.config.validate()
         if errors:
             self._log("設定錯誤: " + "；".join(errors), "ERROR")
@@ -229,7 +238,7 @@ class BotEngine:
             self._log("設定錯誤: " + "；".join(errors), "ERROR")
             return False
         if not self.has_browser:
-            self._log("請先啟動瀏覽器", "ERROR")
+            self._note_browser_closed()
             return False
         if self._thread and self._thread.is_alive():
             if self._state.status == BotStatus.WAITING_LOGIN:
@@ -262,6 +271,79 @@ class BotEngine:
         if self._browser:
             self._browser.stop()
             self._browser = None
+        self._activity = None
+        self._order = None
+        self._login = None
+
+    def _note_browser_closed(self) -> None:
+        self._log("瀏覽器已關閉，請重新按「啟動瀏覽器」", "WARNING")
+        self._cleanup()
+        self._update_state(
+            status=BotStatus.STOPPED,
+            step=BotStep.INIT,
+            message="瀏覽器已關閉，請重新啟動瀏覽器",
+        )
+
+    def _browser_still_open(self) -> bool:
+        if self.has_browser:
+            return True
+        self._note_browser_closed()
+        return False
+
+    def _wait_while_idle(self, seconds: float) -> bool:
+        """Sleep, but abort if the user closed Chrome. Return False if browser is gone."""
+        end = time.time() + max(0.0, seconds)
+        while time.time() < end and not self._should_stop():
+            if not self.has_browser:
+                self._note_browser_closed()
+                return False
+            time.sleep(min(0.25, end - time.time()))
+        return self.has_browser or self._should_stop()
+
+    def _finish_after_execute(self, success: bool) -> None:
+        if self._state.status == BotStatus.STOPPED and not self.has_browser:
+            return
+        if success:
+            self._update_state(
+                status=BotStatus.SUCCESS,
+                step=BotStep.COMPLETE,
+                message="已進入付款頁，請手動完成付款",
+            )
+            self._log("已進入付款頁。瀏覽器會保持開啟，請自行完成付款與 3D 驗證。")
+            self._beep()
+            while not self._should_stop():
+                if not self._wait_while_idle(1.0):
+                    return
+            if self.has_browser:
+                self._update_state(
+                    status=BotStatus.WAITING_LOGIN,
+                    step=BotStep.WAIT_LOGIN,
+                    message="可改設定後再按開始搶票",
+                )
+            return
+        if self._state.status == BotStatus.STOPPED:
+            return
+        if not self._should_stop():
+            self._update_state(status=BotStatus.FAILED, message="未能完成購票")
+        elif self.has_browser:
+            self._update_state(
+                status=BotStatus.WAITING_LOGIN,
+                step=BotStep.WAIT_LOGIN,
+                message="已停止，可改設定後再按開始搶票",
+            )
+
+    def _looks_like_dead_browser(self, exc: Exception) -> bool:
+        text = str(exc).lower()
+        needles = (
+            "invalid session",
+            "no such window",
+            "chrome not reachable",
+            "disconnected",
+            "target window already closed",
+            "web view not found",
+            "session deleted",
+        )
+        return any(n in text for n in needles)
 
     def _run(self) -> None:
         try:
@@ -289,68 +371,36 @@ class BotEngine:
             self._log("準備好後點「開始搶票」")
 
             while not self._start_booking_flag.is_set() and not self._should_stop():
-                time.sleep(0.1)
+                if not self._browser_still_open():
+                    return
+                time.sleep(0.25)
             if self._should_stop():
+                return
+            if not self._browser_still_open():
                 return
 
             self._ensure_login(force_navigate_back=False)
             self._update_state(status=BotStatus.RUNNING)
-            success = self._execute()
-            if success:
-                self._update_state(
-                    status=BotStatus.SUCCESS,
-                    step=BotStep.COMPLETE,
-                    message="已進入付款頁，請手動完成付款",
-                )
-                self._log("已進入付款頁。瀏覽器會保持開啟，請自行完成付款與 3D 驗證。")
-                self._beep()
-                while not self._should_stop():
-                    time.sleep(1)
-                return
-            if not self._should_stop():
-                self._update_state(status=BotStatus.FAILED, message="未能完成購票")
-            elif self.has_browser:
-                self._update_state(
-                    status=BotStatus.WAITING_LOGIN,
-                    step=BotStep.WAIT_LOGIN,
-                    message="已停止，可改設定後再按開始搶票",
-                )
+            self._finish_after_execute(self._execute())
         except Exception as exc:
+            if self._looks_like_dead_browser(exc):
+                self._note_browser_closed()
+                return
             self._log(f"執行錯誤: {exc}", "ERROR")
             self._update_state(status=BotStatus.ERROR, error=str(exc))
 
     def _run_booking(self) -> None:
         try:
+            if not self._browser_still_open():
+                return
             self._log("開始執行購票流程")
             self._update_state(status=BotStatus.RUNNING, step=BotStep.NAVIGATE, message="開始搶票")
             self._ensure_login(force_navigate_back=False)
-            success = self._execute()
-            if success:
-                self._update_state(
-                    status=BotStatus.SUCCESS,
-                    step=BotStep.COMPLETE,
-                    message="已進入付款頁，請手動完成付款",
-                )
-                self._log("已進入付款頁。瀏覽器會保持開啟，請自行完成付款與 3D 驗證。")
-                self._beep()
-                while not self._should_stop():
-                    time.sleep(1)
-                if self.has_browser:
-                    self._update_state(
-                        status=BotStatus.WAITING_LOGIN,
-                        step=BotStep.WAIT_LOGIN,
-                        message="可改設定後再按開始搶票",
-                    )
-                return
-            if not self._should_stop():
-                self._update_state(status=BotStatus.FAILED, message="未能完成購票")
-            elif self.has_browser:
-                self._update_state(
-                    status=BotStatus.WAITING_LOGIN,
-                    step=BotStep.WAIT_LOGIN,
-                    message="已停止，可改設定後再按開始搶票",
-                )
+            self._finish_after_execute(self._execute())
         except Exception as exc:
+            if self._looks_like_dead_browser(exc):
+                self._note_browser_closed()
+                return
             self._log(f"執行錯誤: {exc}", "ERROR")
             self._update_state(status=BotStatus.ERROR, error=str(exc))
 
@@ -389,10 +439,15 @@ class BotEngine:
 
         retries = 0
         while not self._should_stop() and retries < self.max_retries:
+            if not self._browser_still_open():
+                return False
             self._state.retry_count = retries
             url = self._activity.current_url
 
             if self._ensure_login(force_navigate_back=True):
+                if not self._login.is_logged_in():
+                    self._sleep(1.0)
+                    continue
                 retries += 1
                 continue
             if self._handle_human_gate():
@@ -489,13 +544,13 @@ class BotEngine:
                     retries += 1
                     continue
 
-            if "login" in url.lower() or "signin" in url.lower():
+            if is_login_url(url) or "signin" in url.lower():
                 if self._ensure_login(force_navigate_back=True):
+                    if not self._login.is_logged_in():
+                        self._sleep(1.0)
                     retries += 1
                     continue
-                self._log("仍在登入頁，等待自動登入或手動登入", "WARNING")
                 self._sleep(1.0)
-                retries += 1
                 continue
 
             if self._order.has_hold():
@@ -602,45 +657,63 @@ class BotEngine:
         return self._advance_after_hold(self._order.current_url)
 
     def _ensure_login(self, force_navigate_back: bool = True) -> bool:
-        """已登入則不做任何事。被登出才自動登入。回傳是否剛完成登入。"""
+        """未登入就停在登入，不要去刷新活動 / 購票頁。
+
+        回傳 True：還沒準備好搶票（等登入，或剛登入完要回到活動頁）。
+        回傳 False：已登入，可以繼續。
+        """
         assert self._login
         if self._login.is_logged_in() and not self._login.has_login_form():
             return False
+
+        self._update_state(step=BotStep.WAIT_LOGIN, message="尚未登入，先完成登入")
         mobile = (self.config.account or "").strip()
         password = self.config.password or ""
         if not mobile or not password:
-            self._log_once("need-login", "偵測到未登入，但尚未設定帳號密碼，請手動登入")
-            return False
+            self._log_once("need-login", "尚未登入。請在瀏覽器登入，登入完成後會繼續，不會重刷頁面")
+            return True
+
         now = time.time()
-        if now - self._last_login_at < 6:
-            return False
-        self._last_login_at = now
-        self._update_state(step=BotStep.WAIT_LOGIN, message="偵測到未登入，自動登入中")
+        if now - self._last_login_at >= 5:
+            self._last_login_at = now
+            self._try_auto_login(mobile, password)
+
+        if self._login.is_logged_in() and not self._login.has_login_form():
+            self._log("自動登入成功")
+            if force_navigate_back and self.config.activity_url:
+                self._activity.open(self.config.activity_url)
+                self._sleep(0.8)
+            return True
+
+        if self._login.has_login_form() or is_login_url(self._login.current_url):
+            self._log_once("wait-login-form", "停在登入頁等待登入完成，先不刷新活動頁")
+        return True
+
+    def _try_auto_login(self, mobile: str, password: str) -> None:
         self._log("偵測到未登入，正在自動登入")
         if not self._login.has_login_form():
             if not self._login.open_login_form():
                 self._log("打不開登入表單，稍後再試", "WARNING")
-                return False
+                return
         if self._login.has_recaptcha() and self.wait_for_human:
             self._log("登入出現驗證碼，請在瀏覽器完成")
             while not self._should_stop() and self._login.has_recaptcha():
                 self._sleep(0.5)
         if not self._login.fill_and_submit(mobile, password, self.config.country_code or "+886"):
-            self._log("自動填寫登入失敗，請檢查帳號或改手動登入", "WARNING")
-            return False
-        if not self._login.wait_until_logged_in(timeout=12):
-            if self._login.has_recaptcha() and self.wait_for_human:
-                self._log("登入需要驗證碼，請在瀏覽器完成後會繼續")
-                while not self._should_stop() and not self._login.is_logged_in():
-                    self._sleep(0.5)
-            if not self._login.is_logged_in():
-                self._log("自動登入尚未成功", "WARNING")
-                return False
-        self._log("自動登入成功")
-        if force_navigate_back and self.config.activity_url:
-            self._activity.open(self.config.activity_url)
-            self._sleep(0.8)
-        return True
+            self._log("自動填寫登入失敗，稍後再試或改手動登入", "WARNING")
+            return
+        if self._login.wait_until_logged_in(timeout=12):
+            return
+        if self._login.has_recaptcha() and self.wait_for_human:
+            self._log("登入需要驗證碼，請在瀏覽器完成後會繼續")
+            while not self._should_stop() and not self._login.is_logged_in():
+                self._sleep(0.5)
+            return
+        err = self._login.login_error_text()
+        if err:
+            self._log(f"登入沒過：頁面顯示「{err}」。帳密若正確，可能是驗證碼或門號格式", "WARNING")
+        else:
+            self._log("自動登入尚未成功，停在登入頁等你完成，不會重刷", "WARNING")
 
     def _handle_queue(self) -> bool:
         assert self._activity

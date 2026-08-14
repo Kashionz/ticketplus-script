@@ -77,7 +77,7 @@ class BrowserManager:
             options.add_argument(f"--user-data-dir={str(profile)}")
         if self.chrome_binary:
             options.binary_location = self.chrome_binary
-        options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+        options.add_experimental_option("excludeSwitches", ["enable-logging"])
         options.add_experimental_option("useAutomationExtension", False)
         return options
 
@@ -95,6 +95,8 @@ class BrowserManager:
     def start(self) -> WebDriver:
         if self.is_running:
             return self._driver
+        if self._driver is not None:
+            self.stop()
 
         address = self.debugger_address
         if not address and self.prefer_windows_chrome and is_wsl() and not self.headless:

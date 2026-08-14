@@ -182,6 +182,22 @@ def is_activity_url(url: str) -> bool:
     return bool(segs) and segs[0] == "activity"
 
 
+def is_login_url(url: str) -> bool:
+    segs = url_path_segments(url)
+    return bool(segs) and segs[0] in {"login", "signin", "sign-in"}
+
+
+def normalize_mobile(mobile: str, country_code: str = "+886") -> str:
+    """遠大台灣門號欄位通常要 09xxxxxxxx，不要把 +886 填進區碼選單。"""
+    digits = re.sub(r"\D", "", mobile or "")
+    cc = re.sub(r"\D", "", country_code or "")
+    if cc and digits.startswith(cc):
+        digits = digits[len(cc) :]
+    if cc in {"886", ""} and len(digits) == 9 and digits.startswith("9"):
+        digits = "0" + digits
+    return digits
+
+
 MOCK_HOSTS = frozenset({"127.0.0.1", "localhost", "0.0.0.0", "::1"})
 
 

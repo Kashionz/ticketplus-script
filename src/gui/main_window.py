@@ -360,6 +360,27 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, "錯誤", f"讀取活動資料失敗: {exc}")
 
+    def _shutdown_engine(self, close_browser: bool = True) -> None:
+        worker = self._worker
+        engine = self._bot_engine
+        self._worker = None
+        if worker:
+            for signal, slot in (
+                (worker.status_changed, self._on_status),
+                (worker.log_message, self._on_log),
+                (worker.finished_ok, self._on_finished),
+            ):
+                try:
+                    signal.disconnect(slot)
+                except TypeError:
+                    pass
+        if engine:
+            engine.stop(close_browser=close_browser)
+        if worker:
+            worker.wait(4000)
+        if close_browser:
+            self._bot_engine = None
+
     def _on_launch(self) -> None:
         config = self._ticket_config()
         errors = config.validate()
@@ -369,6 +390,7 @@ class MainWindow(QMainWindow):
         self.log_widget.info("啟動瀏覽器...")
         self._set_ui("launching")
         try:
+            self._shutdown_engine(close_browser=True)
             cfg = self._config or get_config()
             self._bot_engine = BotEngine(
                 config=config,
@@ -410,13 +432,17 @@ class MainWindow(QMainWindow):
 
     def _on_start(self) -> None:
         if not self._bot_engine or not self._bot_engine.has_browser:
-            self.log_widget.warning("請先啟動瀏覽器並完成登入")
+            self.log_widget.warning("瀏覽器已關閉，請重新按「啟動瀏覽器」")
+            self._shutdown_engine(close_browser=True)
+            self._set_ui("idle")
             return
         if not self._apply_ui_settings():
             return
         if self._bot_engine.is_waiting_for_start() and self._bot_engine.is_running:
             self._bot_engine.trigger_start_booking()
         elif not self._bot_engine.start_booking():
+            if not self._bot_engine.has_browser:
+                self._set_ui("idle")
             return
         self._set_ui("running")
 
@@ -426,9 +452,12 @@ class MainWindow(QMainWindow):
         self._set_ui("waiting" if self._bot_engine and self._bot_engine.has_browser else "idle")
 
     def _set_ui(self, mode: str) -> None:
-        self.launch_btn.setEnabled(mode == "idle")
-        self.start_btn.setEnabled(mode == "waiting")
-        self.stop_btn.setEnabled(mode in {"launching", "running"})
+        browser_ok = bool(self._bot_engine and self._bot_engine.has_browser)
+        if mode in {"waiting", "running"} and not browser_ok:
+            mode = "idle"
+        self.launch_btn.setEnabled(mode in {"idle", "waiting"})
+        self.start_btn.setEnabled(mode == "waiting" and browser_ok)
+        self.stop_btn.setEnabled(mode in {"launching", "running", "waiting"})
         editable = mode in {"idle", "waiting"}
         self.activity_url_input.setEnabled(editable)
         self.target_session_input.setEnabled(editable)
@@ -484,8 +513,7 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 event.ignore()
                 return
-        if self._bot_engine:
-            self._bot_engine.stop(close_browser=True)
+        self._shutdown_engine(close_browser=True)
         event.accept()
 
 

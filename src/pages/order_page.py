@@ -409,36 +409,114 @@ class OrderPage(BasePage):
         return False
 
     def fill_exclusive_code(self, code: str) -> bool:
+        """選完票後再找購票頁輸入框。欄位常出現在電腦選位 / 下一步上方。"""
         if not code or not code.strip():
             return False
+        payload = code.strip()
+        last: Dict[str, Any] = {}
+        for _ in range(8):
+            last = self._fill_exclusive_code_once(payload)
+            if last.get("filled"):
+                logger.info("已填入購票序號（輸入框 %s）", last.get("where") or "購票頁")
+                return True
+            self.wait_seconds(0.15)
+        logger.debug("頁面上沒有可填的購票序號輸入框：%s", last.get("reason") or "no-input")
+        return False
+
+    def _fill_exclusive_code_once(self, code: str) -> Dict[str, Any]:
         result = self.execute_js(
             """
             const code = arguments[0];
             const keywords = ['序號', '加購', '優惠'];
-            let filled = 0;
-            const labels = document.querySelectorAll('.exclusive-code .label, label, .v-label');
-            for (const label of labels) {
-                const text = (label.textContent || '').trim();
-                if (!keywords.some(k => text.includes(k))) continue;
-                const box = label.closest('.exclusive-code, .v-input, .v-text-field') || label.parentElement;
-                if (!box) continue;
-                const input = box.querySelector('input[type="text"], input:not([type]), input[type="search"]');
-                if (!input) continue;
+
+            function visible(el) {
+                if (!el || el.disabled || el.readOnly) return false;
+                const style = window.getComputedStyle(el);
+                const box = el.getBoundingClientRect();
+                if (style.visibility === 'hidden' || style.display === 'none') return false;
+                if (Number(style.opacity) === 0) return false;
+                return box.width >= 2 && box.height >= 2;
+            }
+
+            function typeOk(el) {
+                const t = String(el.type || 'text').toLowerCase();
+                return t === 'text' || t === 'search' || t === '';
+            }
+
+            function excluded(el) {
+                if (!typeOk(el)) return true;
+                return Boolean(el.closest([
+                    '.count-button',
+                    '.v-expansion-panel',
+                    '.v-select',
+                    '.lang-select',
+                    '.lang-pill',
+                    'header',
+                    '#appBar',
+                    '.login-card',
+                    '.mock-control',
+                    '.auth-box',
+                ].join(', ')));
+            }
+
+            function nearbyFooter(el) {
+                const footer = document.querySelector('.order-footer, button.nextBtn');
+                if (!footer) return false;
+                const a = el.getBoundingClientRect();
+                const b = footer.getBoundingClientRect();
+                return a.bottom <= b.bottom + 48 && a.top >= b.top - 180;
+            }
+
+            function contextText(el) {
+                const box = el.closest('.exclusive-code, .order-code-row, .order-footer, .v-input, .v-text-field, label') || el.parentElement;
+                return [
+                    (box && box.innerText) || '',
+                    el.placeholder || '',
+                    el.getAttribute('aria-label') || '',
+                    el.name || '',
+                ].join(' ');
+            }
+
+            function score(el) {
+                const text = contextText(el);
+                let n = 0;
+                if (el.closest('.exclusive-code, .order-code-row')) n += 80;
+                if (el.closest('.order-footer')) n += 70;
+                if (keywords.some((k) => text.includes(k))) n += 50;
+                if (nearbyFooter(el)) n += 40;
+                if (el.closest('.seats-area, .order-page')) n += 20;
+                return n;
+            }
+
+            function setValue(input, value) {
                 input.focus();
-                input.value = code;
+                const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+                if (desc && desc.set) desc.set.call(input, value);
+                else input.value = value;
                 input.dispatchEvent(new Event('input', {bubbles: true}));
                 input.dispatchEvent(new Event('change', {bubbles: true}));
-                filled += 1;
             }
-            return filled;
+
+            const candidates = Array.from(document.querySelectorAll('input')).filter((el) => visible(el) && !excluded(el));
+            if (!candidates.length) return {filled: 0, reason: 'no-input'};
+            candidates.sort((a, b) => score(b) - score(a));
+            const target = candidates[0];
+            if (score(target) <= 0 && candidates.length > 1) {
+                return {filled: 0, reason: 'no-order-input', count: candidates.length};
+            }
+            setValue(target, code);
+            return {
+                filled: 1,
+                where: target.closest('.order-footer') ? 'footer'
+                    : target.closest('.order-code-row, .exclusive-code') ? 'above-next'
+                    : nearbyFooter(target) ? 'near-next'
+                    : 'order-input',
+                score: score(target),
+            };
             """,
-            code.strip(),
+            code,
         )
-        if result:
-            logger.info("已填入購票序號")
-            return True
-        logger.debug("頁面上沒有購票序號欄位")
-        return False
+        return result if isinstance(result, dict) else {"filled": 0}
 
     def agree_terms(self) -> bool:
         result = self.execute_js(

@@ -148,11 +148,13 @@ button.nextBtn.disabledBtn, button.nextBtn:disabled {
 }
 .exclusive-code { display: block; margin: 15px 0 0; padding: 24px; background-color: rgba(55,156,196,.2); }
 .exclusive-code .label { display: block; font-size: 24px; font-weight: 700; margin-bottom: 16px; }
-.exclusive-code input, .login-card input {
-  width: 100%; max-width: 560px; padding: 12px; border: 1px solid #cfd8dc; border-radius: 4px; background: #fff;
+.order-code-row { padding: 8px 8px 0; }
+.order-code-row input, .exclusive-code input, .login-card input {
+  width: 100%; max-width: 360px; padding: 10px 12px; border: 1px solid #cfd8dc; border-radius: 4px; background: #fff;
 }
 .seat-mode, .agree-row { padding: 12px 8px; font-size: 15px; }
-.order-footer { display: flex; justify-content: flex-end; gap: 12px; padding: 16px 8px; }
+.order-footer { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 16px 8px; }
+.order-footer .seat-mode { margin-right: auto; padding: 0; }
 .order-footer .ghost {
   min-width: 150px; background: #fff; border: 1px solid #379cc4; color: #379cc4;
   border-radius: 20px; padding: 10px 20px; cursor: pointer;
