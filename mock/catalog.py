@@ -12,6 +12,7 @@ SCENARIOS = (
     "presale",
     "priority-soldout",
     "stock-later",
+    "low-stock",
     "need-login",
     "need-serial",
     "queue",

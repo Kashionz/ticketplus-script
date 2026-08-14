@@ -174,6 +174,7 @@ class OrderPage(BasePage):
         area_priorities: List[str],
         quantity: int,
         allow_fallback: bool = False,
+        require_exact_quantity: bool = False,
     ) -> bool:
         if not self.wait_for_area_widgets():
             logger.debug("購票區元件尚未出現")
@@ -181,43 +182,65 @@ class OrderPage(BasePage):
         priorities = [p for p in area_priorities if p and p.strip()]
         last_result: Dict[str, Any] = {}
         for keyword in priorities:
-            result = self._try_keyword(keyword, quantity)
+            result = self._try_keyword(keyword, quantity, require_exact_quantity)
             last_result = result
             if result.get("ok"):
                 return True
         if not priorities or allow_fallback:
-            if self._select_first_available(quantity):
+            if self._select_first_available(quantity, require_exact_quantity):
                 return True
         names = self.list_area_names()
+        reason = last_result.get("message") or "unknown"
+        if reason == "short-stock":
+            reason = (
+                f"剩餘 {last_result.get('remain')} 不足指定 {quantity} 張"
+                f"（{last_result.get('selected') or '符合的票區'}）"
+            )
         logger.info(
             "票區未選到（要找 %s；畫面上有：%s；原因：%s）",
             priorities or "（未指定，改第一個可購）",
             names or "（尚未渲染）",
-            last_result.get("message") or "unknown",
+            reason,
         )
         return False
 
-    def _try_keyword(self, keyword: str, quantity: int) -> Dict[str, Any]:
-        result = self._select_once(keyword, quantity)
+    def _try_keyword(
+        self,
+        keyword: str,
+        quantity: int,
+        require_exact_quantity: bool = False,
+    ) -> Dict[str, Any]:
+        result = self._select_once(keyword, quantity, require_exact_quantity)
         if result.get("success") and result.get("clicked"):
-            logger.info("已選擇: %s x%s", result.get("selected") or keyword or "第一個可購票區", quantity)
+            self._log_selected(result, keyword, quantity)
             return {"ok": True, **result}
         if result.get("needRetry") or (result.get("success") and not result.get("clicked")):
             if result.get("message") == "expanded-group":
                 self.wait_seconds(0.35)
-                result = self._select_once(keyword, quantity)
+                result = self._select_once(keyword, quantity, require_exact_quantity)
                 if result.get("success") and result.get("clicked"):
-                    logger.info("已選擇: %s x%s", result.get("selected") or keyword, quantity)
+                    self._log_selected(result, keyword, quantity)
                     return {"ok": True, **result}
-            if self._retry_plus(quantity):
-                logger.info("已選擇: %s x%s", result.get("selected") or keyword or "第一個可購票區", quantity)
-                return {"ok": True, **result}
+            retried = self._retry_plus(quantity, require_exact_quantity)
+            if retried.get("success"):
+                self._log_selected(retried, keyword, quantity)
+                return {"ok": True, **retried}
         return {"ok": False, **(result or {})}
 
-    def _select_first_available(self, quantity: int) -> bool:
+    def _log_selected(self, result: Dict[str, Any], keyword: str, wanted: int) -> None:
+        name = result.get("selected") or keyword or "第一個可購票區"
+        qty = result.get("quantity") or wanted
+        remain = result.get("remain")
+        if result.get("reduced"):
+            extra = f"，剩餘 {remain}" if remain is not None else ""
+            logger.info("已選擇: %s x%s（指定 %s 張%s，改買剩餘）", name, qty, wanted, extra)
+            return
+        logger.info("已選擇: %s x%s", name, qty)
+
+    def _select_first_available(self, quantity: int, require_exact_quantity: bool = False) -> bool:
         """畫面上由上到下第一個還能買的內層票區。"""
         for _ in range(8):
-            result = self._try_keyword("", quantity)
+            result = self._try_keyword("", quantity, require_exact_quantity)
             if result.get("ok"):
                 return True
             if not self._expand_next_group():
@@ -244,11 +267,17 @@ class OrderPage(BasePage):
             )
         )
 
-    def _select_once(self, keyword: str, quantity: int) -> Dict[str, Any]:
+    def _select_once(
+        self,
+        keyword: str,
+        quantity: int,
+        require_exact_quantity: bool = False,
+    ) -> Dict[str, Any]:
         result = self.execute_js(
             """
             const keyword = arguments[0] || '';
             const ticketNumber = arguments[1] || 1;
+            const requireExact = Boolean(arguments[2]);
             const normalize = (s) => (s || '').replace(/[\\s\\u3000]/g, '').toLowerCase();
             const kw = normalize(keyword);
 
@@ -263,16 +292,11 @@ class OrderPage(BasePage):
                 return false;
             }
 
-            function clickPlus(btn, times) {
-                const target = (btn && btn.closest && btn.closest('button')) || btn;
-                for (let i = 0; i < times; i++) target.click();
-            }
-
-            function alreadyHasQty(panel, want) {
-                const counter = panel.querySelector('.count-button, .count-button div');
-                if (!counter) return false;
-                const n = parseInt((counter.innerText || '').replace(/[^0-9]/g, ''), 10);
-                return Number.isFinite(n) && n >= want && n <= 20;
+            function parseRemain(text) {
+                const s = String(text || '');
+                if ((/已售完|售罄|售完/.test(s)) && !/剩餘\\s*[1-9]/.test(s)) return 0;
+                const m = s.match(/剩餘\\s*[:：]?\\s*(\\d+)/);
+                return m ? parseInt(m[1], 10) : null;
             }
 
             function ownHeader(panel) {
@@ -288,6 +312,23 @@ class OrderPage(BasePage):
             function headerText(panel) {
                 const header = ownHeader(panel);
                 return ((header && header.innerText) || '').trim().replace(/\\s+/g, ' ');
+            }
+
+            function remainOf(panel) {
+                const header = ownHeader(panel);
+                const small = header && header.querySelector('small.ml-1, .remain-tag');
+                if (small) {
+                    const n = parseRemain(small.textContent);
+                    if (n !== null) return n;
+                }
+                return parseRemain(headerText(panel));
+            }
+
+            function buyQtyFor(remain, want) {
+                if (remain === 0) return null;
+                if (remain === null || remain === undefined) return want;
+                if (remain >= want) return want;
+                return requireExact ? null : remain;
             }
 
             function nameMatches(name, keyword) {
@@ -317,6 +358,72 @@ class OrderPage(BasePage):
                 return clicked;
             }
 
+            function findLeaf(name) {
+                const leafs = Array.from(document.querySelectorAll('.v-expansion-panel')).filter(isLeaf);
+                return leafs.find((p) => headerText(p) === name)
+                    || leafs.find((p) => nameMatches(headerText(p), name))
+                    || null;
+            }
+
+            function readCount(panel) {
+                const box = panel && panel.querySelector('.count-button');
+                if (!box) return 0;
+                const mid = Array.from(box.children).find((el) => el.tagName === 'DIV');
+                const n = parseInt(String((mid && mid.textContent) || box.textContent || '').replace(/[^0-9]/g, ''), 10);
+                return Number.isFinite(n) ? n : 0;
+            }
+
+            function closestBtn(el) {
+                return el ? (el.closest('button') || el) : null;
+            }
+
+            function plusBtn(panel) {
+                const icon = panel && (panel.querySelector('.count-button .mdi-plus') || panel.querySelector('.mdi-plus'));
+                return closestBtn(icon);
+            }
+
+            function minusBtn(panel) {
+                const icon = panel && (panel.querySelector('.count-button .mdi-minus') || panel.querySelector('.mdi-minus'));
+                return closestBtn(icon);
+            }
+
+            function isLimited(btn) {
+                if (!btn) return true;
+                if (btn.disabled) return true;
+                const limit = String(btn.getAttribute('data-limit') || '').toLowerCase();
+                if (limit === 'true' || limit === '1') return true;
+                const count = parseInt(btn.getAttribute('data-count') || '', 10);
+                return Number.isFinite(count) && count <= 0;
+            }
+
+            function adjustQty(startPanel, name, want) {
+                let panel = startPanel;
+                let qty = readCount(panel);
+                for (let i = 0; i < 12 && qty < want; i++) {
+                    const plus = plusBtn(panel);
+                    if (!plus || isLimited(plus)) break;
+                    plus.click();
+                    panel = findLeaf(name) || panel;
+                    const next = readCount(panel);
+                    if (next <= qty) break;
+                    qty = next;
+                }
+                for (let i = 0; i < 12 && qty > want; i++) {
+                    const minus = minusBtn(panel);
+                    if (!minus) break;
+                    minus.click();
+                    panel = findLeaf(name) || panel;
+                    const next = readCount(panel);
+                    if (next >= qty) break;
+                    qty = next;
+                }
+                return {qty: qty, panel: panel};
+            }
+
+            function packResult(ok, extra) {
+                return Object.assign({success: ok, clicked: ok}, extra || {});
+            }
+
             const hasPanel = document.querySelector('.v-expansion-panel');
             const hasPlus = document.querySelector('.count-button .mdi-plus, .mdi-plus');
 
@@ -324,15 +431,32 @@ class OrderPage(BasePage):
                 const allPanels = Array.from(document.querySelectorAll('.v-expansion-panel'));
                 const leafs = allPanels.filter(isLeaf);
                 const valid = [];
+                const skipped = [];
                 for (const panel of leafs) {
                     const header = ownHeader(panel);
                     if (!header) continue;
                     const name = headerText(panel);
                     if (isSoldOut(header)) continue;
-                    valid.push({panel, name, header});
+                    const remain = remainOf(panel);
+                    const buyQty = buyQtyFor(remain, ticketNumber);
+                    if (buyQty == null) {
+                        skipped.push({name: name, remain: remain, reason: 'short-stock'});
+                        continue;
+                    }
+                    valid.push({panel: panel, name: name, header: header, remain: remain, buyQty: buyQty});
                 }
                 let target = kw ? valid.find((v) => nameMatches(v.name, keyword)) : valid[0];
                 if (!target && kw) {
+                    const skippedHit = skipped.find((v) => nameMatches(v.name, keyword));
+                    if (skippedHit) {
+                        return {
+                            success: false,
+                            message: 'short-stock',
+                            selected: skippedHit.name,
+                            remain: skippedHit.remain,
+                            wanted: ticketNumber,
+                        };
+                    }
                     const groups = allPanels.filter((p) => !isLeaf(p));
                     const group = groups.find((p) => {
                         const g = normalize(headerText(p));
@@ -352,16 +476,37 @@ class OrderPage(BasePage):
                 expandAncestors(target.panel);
                 if (!target.panel.classList.contains('v-expansion-panel--active')) {
                     target.header.click();
+                    target.panel = findLeaf(target.name) || target.panel;
+                    target.header = ownHeader(target.panel) || target.header;
                 }
-                if (alreadyHasQty(target.panel, ticketNumber)) {
-                    return {success: true, clicked: true, selected: target.name, type: 'already'};
+                const plus = plusBtn(target.panel);
+                if (!plus && !target.panel.querySelector('.count-button')) {
+                    return {success: true, clicked: false, needRetry: true, selected: target.name, remain: target.remain};
                 }
-                const plus = target.panel.querySelector('.count-button .mdi-plus, .mdi-plus');
-                if (plus) {
-                    clickPlus(plus, ticketNumber);
-                    return {success: true, clicked: true, selected: target.name, type: 'panel'};
+                const adjusted = adjustQty(target.panel, target.name, target.buyQty);
+                const qty = adjusted.qty;
+                const reduced = qty < ticketNumber;
+                if (qty < 1) {
+                    return {success: false, message: 'no-qty', selected: target.name, remain: target.remain};
                 }
-                return {success: true, clicked: false, needRetry: true, selected: target.name};
+                if (reduced && requireExact) {
+                    return {
+                        success: false,
+                        message: 'short-stock',
+                        selected: target.name,
+                        remain: target.remain == null ? qty : target.remain,
+                        quantity: qty,
+                        wanted: ticketNumber,
+                    };
+                }
+                return packResult(true, {
+                    selected: target.name,
+                    type: 'panel',
+                    quantity: qty,
+                    remain: target.remain,
+                    wanted: ticketNumber,
+                    reduced: reduced,
+                });
             }
 
             if (hasPlus) {
@@ -373,43 +518,193 @@ class OrderPage(BasePage):
                     const nameEl = row.querySelector('.font-weight-medium, .text-title, .v-list-item__title');
                     const name = ((nameEl && nameEl.textContent) || row.textContent || '').trim().replace(/\\s+/g, ' ');
                     if (isSoldOut(row)) continue;
-                    valid.push({row, name, plus});
+                    const remain = parseRemain(name);
+                    const buyQty = buyQtyFor(remain, ticketNumber);
+                    if (buyQty == null) continue;
+                    valid.push({row: row, name: name, plus: plus, remain: remain, buyQty: buyQty});
                 }
                 let target = kw ? valid.find(v => normalize(v.name).includes(kw)) : valid[0];
                 if (!target) return {success: false, message: 'no-row-match', attempted: keyword};
-                clickPlus(target.plus, ticketNumber);
-                return {success: true, clicked: true, selected: target.name, type: 'row'};
+                const btn = closestBtn(target.plus);
+                for (let i = 0; i < target.buyQty; i++) {
+                    if (!btn || isLimited(btn)) break;
+                    btn.click();
+                }
+                return packResult(true, {
+                    selected: target.name,
+                    type: 'row',
+                    quantity: target.buyQty,
+                    remain: target.remain,
+                    wanted: ticketNumber,
+                    reduced: target.buyQty < ticketNumber,
+                });
             }
             return {success: false, message: 'no-selectable'};
             """,
             keyword,
             int(quantity),
+            bool(require_exact_quantity),
         )
         return result if isinstance(result, dict) else {"success": False}
 
-    def _retry_plus(self, quantity: int) -> bool:
+    def _retry_plus(self, quantity: int, require_exact_quantity: bool = False) -> Dict[str, Any]:
+        last: Dict[str, Any] = {}
         for _ in range(6):
             self.wait_seconds(0.2)
-            ok = self.execute_js(
+            last = self.execute_js(
                 """
-                const n = arguments[0];
+                const want = arguments[0] || 1;
+                const requireExact = Boolean(arguments[1]);
+                function ownHeader(panel) {
+                    return Array.from(panel.children).find((el) =>
+                        el.classList && el.classList.contains('v-expansion-panel-header')
+                    );
+                }
+                function isLeaf(panel) {
+                    return panel.querySelectorAll('.v-expansion-panel').length === 0;
+                }
+                function headerText(panel) {
+                    const header = ownHeader(panel);
+                    return ((header && header.innerText) || '').trim().replace(/\\s+/g, ' ');
+                }
+                function parseRemain(text) {
+                    const m = String(text || '').match(/剩餘\\s*[:：]?\\s*(\\d+)/);
+                    return m ? parseInt(m[1], 10) : null;
+                }
+                function remainOf(panel) {
+                    const header = ownHeader(panel);
+                    const small = header && header.querySelector('small.ml-1, .remain-tag');
+                    return small ? parseRemain(small.textContent) : parseRemain(headerText(panel));
+                }
+                function closestBtn(el) { return el ? (el.closest('button') || el) : null; }
+                function plusBtn(panel) {
+                    const icon = panel && (panel.querySelector('.count-button .mdi-plus') || panel.querySelector('.mdi-plus'));
+                    return closestBtn(icon);
+                }
+                function minusBtn(panel) {
+                    const icon = panel && (panel.querySelector('.count-button .mdi-minus') || panel.querySelector('.mdi-minus'));
+                    return closestBtn(icon);
+                }
+                function isLimited(btn) {
+                    if (!btn) return true;
+                    if (btn.disabled) return true;
+                    const limit = String(btn.getAttribute('data-limit') || '').toLowerCase();
+                    if (limit === 'true' || limit === '1') return true;
+                    const count = parseInt(btn.getAttribute('data-count') || '', 10);
+                    return Number.isFinite(count) && count <= 0;
+                }
+                function readCount(panel) {
+                    const box = panel && panel.querySelector('.count-button');
+                    if (!box) return 0;
+                    const mid = Array.from(box.children).find((el) => el.tagName === 'DIV');
+                    const n = parseInt(String((mid && mid.textContent) || box.textContent || '').replace(/[^0-9]/g, ''), 10);
+                    return Number.isFinite(n) ? n : 0;
+                }
+                function findLeaf(name) {
+                    const leafs = Array.from(document.querySelectorAll('.v-expansion-panel')).filter(isLeaf);
+                    return leafs.find((p) => headerText(p) === name) || null;
+                }
                 const actives = Array.from(document.querySelectorAll('.v-expansion-panel--active'));
-                const leaf = actives.filter((p) => p.querySelectorAll('.v-expansion-panel').length === 0).pop()
-                    || actives[actives.length - 1];
-                const plus = leaf && (leaf.querySelector('.count-button .mdi-plus') || leaf.querySelector('.mdi-plus'));
-                if (!plus) return false;
-                const target = plus.closest('button') || plus;
-                for (let i = 0; i < n; i++) target.click();
-                return true;
+                let leaf = actives.filter((p) => isLeaf(p)).pop() || actives[actives.length - 1];
+                if (!leaf) return {success: false};
+                const name = headerText(leaf);
+                const remain = remainOf(leaf);
+                let target = want;
+                if (remain === 0) return {success: false, message: 'short-stock', remain: 0, selected: name};
+                if (remain !== null && remain < want) {
+                    if (requireExact) return {success: false, message: 'short-stock', remain: remain, selected: name, wanted: want};
+                    target = remain;
+                }
+                let qty = readCount(leaf);
+                for (let i = 0; i < 12 && qty < target; i++) {
+                    const plus = plusBtn(leaf);
+                    if (!plus || isLimited(plus)) break;
+                    plus.click();
+                    leaf = findLeaf(name) || leaf;
+                    const next = readCount(leaf);
+                    if (next <= qty) break;
+                    qty = next;
+                }
+                if (qty < 1) return {success: false, selected: name, remain: remain};
+                if (qty < want && requireExact) {
+                    return {success: false, message: 'short-stock', selected: name, remain: remain == null ? qty : remain, quantity: qty};
+                }
+                return {
+                    success: true,
+                    clicked: true,
+                    selected: name,
+                    quantity: qty,
+                    remain: remain,
+                    wanted: want,
+                    reduced: qty < want,
+                };
                 """,
                 int(quantity),
+                bool(require_exact_quantity),
             )
-            if ok:
-                return True
-        return False
+            if isinstance(last, dict) and last.get("success"):
+                return last
+        return last if isinstance(last, dict) else {"success": False}
+
+    def exclusive_code_field(self) -> Dict[str, Any]:
+        """官方優先購：`.exclusive-code` 區塊，或 placeholder / 標籤含遠傳優先購序號。"""
+        result = self.execute_js(
+            """
+            function visible(el) {
+                if (!el || el.disabled) return false;
+                const style = window.getComputedStyle(el);
+                const box = el.getBoundingClientRect();
+                if (style.visibility === 'hidden' || style.display === 'none') return false;
+                if (Number(style.opacity) === 0) return false;
+                return box.width >= 2 && box.height >= 2;
+            }
+
+            function typeOk(el) {
+                const t = String(el.type || 'text').toLowerCase();
+                return t === 'text' || t === 'search' || t === '';
+            }
+
+            function looksLikeCode(text) {
+                const s = String(text || '');
+                return s.includes('遠傳優先購') || s.includes('優先購序號');
+            }
+
+            function pack(input, where) {
+                const box = input.closest('.exclusive-code') || input.closest('.v-input') || input.parentElement;
+                return {
+                    found: 1,
+                    where: where,
+                    placeholder: input.placeholder || '',
+                    label: box ? String(box.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 40) : '',
+                };
+            }
+
+            const official = document.querySelector('.exclusive-code');
+            if (official) {
+                const input = official.querySelector('input');
+                if (input && typeOk(input) && visible(input)) return pack(input, 'exclusive-code');
+            }
+
+            const inputs = Array.from(document.querySelectorAll('input')).filter((el) => typeOk(el) && visible(el));
+            for (const input of inputs) {
+                const box = input.closest('.exclusive-code, .v-input, .v-text-field, .v-form, label') || input.parentElement;
+                const text = [
+                    (box && box.innerText) || '',
+                    input.placeholder || '',
+                    input.getAttribute('aria-label') || '',
+                ].join(' ');
+                if (looksLikeCode(text)) return pack(input, 'placeholder');
+            }
+            return {found: 0};
+            """
+        )
+        return result if isinstance(result, dict) else {"found": 0}
+
+    def has_exclusive_code_field(self) -> bool:
+        return bool(self.exclusive_code_field().get("found"))
 
     def fill_exclusive_code(self, code: str) -> bool:
-        """選完票後再找購票頁輸入框。欄位常出現在電腦選位 / 下一步上方。"""
+        """只填官方優先購序號欄。沒有 `.exclusive-code` 就略過。"""
         if not code or not code.strip():
             return False
         payload = code.strip()
@@ -417,8 +712,10 @@ class OrderPage(BasePage):
         for _ in range(8):
             last = self._fill_exclusive_code_once(payload)
             if last.get("filled"):
-                logger.info("已填入購票序號（輸入框 %s）", last.get("where") or "購票頁")
+                logger.info("已填入購票序號（輸入框 %s）", last.get("where") or "exclusive-code")
                 return True
+            if last.get("reason") == "no-field":
+                break
             self.wait_seconds(0.15)
         logger.debug("頁面上沒有可填的購票序號輸入框：%s", last.get("reason") or "no-input")
         return False
@@ -427,7 +724,6 @@ class OrderPage(BasePage):
         result = self.execute_js(
             """
             const code = arguments[0];
-            const keywords = ['序號', '加購', '優惠'];
 
             function visible(el) {
                 if (!el || el.disabled || el.readOnly) return false;
@@ -443,49 +739,9 @@ class OrderPage(BasePage):
                 return t === 'text' || t === 'search' || t === '';
             }
 
-            function excluded(el) {
-                if (!typeOk(el)) return true;
-                return Boolean(el.closest([
-                    '.count-button',
-                    '.v-expansion-panel',
-                    '.v-select',
-                    '.lang-select',
-                    '.lang-pill',
-                    'header',
-                    '#appBar',
-                    '.login-card',
-                    '.mock-control',
-                    '.auth-box',
-                ].join(', ')));
-            }
-
-            function nearbyFooter(el) {
-                const footer = document.querySelector('.order-footer, button.nextBtn');
-                if (!footer) return false;
-                const a = el.getBoundingClientRect();
-                const b = footer.getBoundingClientRect();
-                return a.bottom <= b.bottom + 48 && a.top >= b.top - 180;
-            }
-
-            function contextText(el) {
-                const box = el.closest('.exclusive-code, .order-code-row, .order-footer, .v-input, .v-text-field, label') || el.parentElement;
-                return [
-                    (box && box.innerText) || '',
-                    el.placeholder || '',
-                    el.getAttribute('aria-label') || '',
-                    el.name || '',
-                ].join(' ');
-            }
-
-            function score(el) {
-                const text = contextText(el);
-                let n = 0;
-                if (el.closest('.exclusive-code, .order-code-row')) n += 80;
-                if (el.closest('.order-footer')) n += 70;
-                if (keywords.some((k) => text.includes(k))) n += 50;
-                if (nearbyFooter(el)) n += 40;
-                if (el.closest('.seats-area, .order-page')) n += 20;
-                return n;
+            function looksLikeCode(text) {
+                const s = String(text || '');
+                return s.includes('遠傳優先購') || s.includes('優先購序號');
             }
 
             function setValue(input, value) {
@@ -497,22 +753,32 @@ class OrderPage(BasePage):
                 input.dispatchEvent(new Event('change', {bubbles: true}));
             }
 
-            const candidates = Array.from(document.querySelectorAll('input')).filter((el) => visible(el) && !excluded(el));
-            if (!candidates.length) return {filled: 0, reason: 'no-input'};
-            candidates.sort((a, b) => score(b) - score(a));
-            const target = candidates[0];
-            if (score(target) <= 0 && candidates.length > 1) {
-                return {filled: 0, reason: 'no-order-input', count: candidates.length};
+            function pickInput() {
+                const official = document.querySelector('.exclusive-code');
+                if (official) {
+                    const input = official.querySelector('input');
+                    if (input && typeOk(input) && visible(input)) {
+                        return {input: input, where: 'exclusive-code'};
+                    }
+                    return null;
+                }
+                const inputs = Array.from(document.querySelectorAll('input')).filter((el) => typeOk(el) && visible(el));
+                for (const input of inputs) {
+                    const box = input.closest('.v-input, .v-text-field, .v-form, label') || input.parentElement;
+                    const text = [
+                        (box && box.innerText) || '',
+                        input.placeholder || '',
+                        input.getAttribute('aria-label') || '',
+                    ].join(' ');
+                    if (looksLikeCode(text)) return {input: input, where: 'placeholder'};
+                }
+                return null;
             }
-            setValue(target, code);
-            return {
-                filled: 1,
-                where: target.closest('.order-footer') ? 'footer'
-                    : target.closest('.order-code-row, .exclusive-code') ? 'above-next'
-                    : nearbyFooter(target) ? 'near-next'
-                    : 'order-input',
-                score: score(target),
-            };
+
+            const picked = pickInput();
+            if (!picked) return {filled: 0, reason: 'no-field'};
+            setValue(picked.input, code);
+            return {filled: 1, where: picked.where};
             """,
             code,
         )

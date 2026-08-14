@@ -97,7 +97,7 @@ def main(argv: Optional[list] = None) -> int:
     server, _thread = start_mock_server(args.host, args.port)
     print(f"模擬站已啟動: {mock_activity_url(args.host, args.port)}")
     print("場景可在頁面上方切換，或加 ?scenario=presale&saleAfter=2")
-    print("可用場景: happy / presale / priority-soldout / stock-later / need-login / need-serial / queue / fail-once / overlay")
+    print("可用場景: happy / presale / priority-soldout / stock-later / low-stock / need-login / need-serial / queue / fail-once / overlay")
     print("Ctrl+C 結束")
     try:
         while True:

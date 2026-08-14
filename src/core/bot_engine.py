@@ -725,6 +725,7 @@ class BotEngine:
             area_priorities=priorities,
             quantity=self.config.quantity,
             allow_fallback=allow_fallback,
+            require_exact_quantity=bool(self.config.require_exact_quantity),
         )
         if not selected:
             names = self._order.list_area_names()
@@ -735,8 +736,14 @@ class BotEngine:
             return False
 
         self._update_state(step=BotStep.FILL_FORM, message="填序號與條款")
-        if self.config.exclusive_code:
-            self._order.fill_exclusive_code(self.config.exclusive_code)
+        if self._order.has_exclusive_code_field():
+            code = (self.config.exclusive_code or "").strip()
+            if not code:
+                self._log_once("need-code", "購票頁出現遠傳優先購序號欄，但設定未填序號")
+                return False
+            if not self._order.fill_exclusive_code(code):
+                self._log_once("fill-code-fail", "找到遠傳優先購序號欄但填入失敗")
+                return False
         if self.auto_agree:
             self._order.agree_terms()
 

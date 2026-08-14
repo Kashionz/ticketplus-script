@@ -70,6 +70,7 @@
     if (sc === "presale" && !opened()) return { kind: "pending", remain: null };
     if (sc === "stock-later" && area.id === "vip3" && !opened()) return { kind: "sold", remain: 0 };
     if (sc === "priority-soldout" && (area.id === "vip3" || area.id === "vip4")) return { kind: "sold", remain: 0 };
+    if (sc === "low-stock" && (area.id === "vip3" || area.id === "vip4")) return { kind: "remain", remain: 1 };
     if (area.kind === "hot") return { kind: "hot", remain: null };
     if (area.kind === "sold") return { kind: "sold", remain: 0 };
     return { kind: "remain", remain: area.remain };
@@ -125,7 +126,7 @@
   }
 
   function controlBar() {
-    const options = ["happy", "presale", "priority-soldout", "stock-later", "need-login", "need-serial", "queue", "fail-once", "overlay"]
+    const options = ["happy", "presale", "priority-soldout", "stock-later", "low-stock", "need-login", "need-serial", "queue", "fail-once", "overlay"]
       .map((s) => `<option value="${s}" ${s === state.scenario ? "selected" : ""}>${s}</option>`)
       .join("");
     return `
@@ -194,9 +195,26 @@
     if (st.kind === "hot") return `<span class="v-chip">熱賣中</span>`;
     if (st.kind === "sold") {
       if (area.forceSoldText) return `<span class="remain-tag soldout">已售完</span>`;
-      return `<span class="remain-tag">剩餘 0</span>`;
+      return `<small class="ml-1">剩餘 0</small>`;
     }
-    return `<span class="remain-tag">剩餘 ${st.remain}</span>`;
+    return `<small class="ml-1">剩餘 ${st.remain}</small>`;
+  }
+
+  function flattenAreas(nodes, out = []) {
+    for (const node of nodes) {
+      if (node.children) flattenAreas(node.children, out);
+      else out.push(node);
+    }
+    return out;
+  }
+
+  function maxQtyFor(id) {
+    const area = flattenAreas(AREA_TREE).find((item) => item.id === id);
+    if (!area) return 4;
+    const st = areaStatus(area);
+    if (st.kind === "sold" || st.kind === "pending") return 0;
+    if (st.remain == null) return 4;
+    return Math.max(0, Math.min(4, st.remain));
   }
 
   function qtyBox(area) {
@@ -204,11 +222,13 @@
     if (st.kind === "pending") return "";
     if (st.kind === "sold") return `<span class="soldout disabled-text">已售完</span>`;
     const n = state.selected[area.id] || 0;
+    const max = maxQtyFor(area.id);
+    const atLimit = n >= max;
     return `
-      <div class="count-button d-flex justify-space-between align-center">
-        <button type="button" class="v-btn v-btn--fab v-size--x-small" data-act="minus" data-id="${area.id}"><i class="mdi mdi-minus"></i></button>
+      <div class="count-button ml-auto d-flex justify-space-between align-center">
+        <button type="button" class="v-btn v-btn--fab v-btn--has-bg v-btn--round theme--light v-size--x-small light-primary-2" data-act="minus" data-id="${area.id}"><span class="v-btn__content"><i class="mdi mdi-minus theme--light primary-1--text"></i></span></button>
         <div>${n}</div>
-        <button type="button" class="v-btn v-btn--fab v-size--x-small" data-act="plus" data-id="${area.id}"><i class="mdi mdi-plus"></i></button>
+        <button type="button" class="v-btn v-btn--fab v-btn--has-bg v-btn--round theme--light v-size--x-small ${atLimit ? "grey-1" : "light-primary-2"}" data-act="plus" data-id="${area.id}" data-count="${Math.max(0, max - n)}" data-limit="${atLimit}"><span class="v-btn__content"><i class="mdi mdi-plus theme--light ${atLimit ? "grey-3--text" : "primary-1--text"}"></i></span></button>
       </div>`;
   }
 
@@ -397,10 +417,33 @@
       ${footer()}`;
   }
 
+  function exclusiveCodeHtml() {
+    if (!needSerial()) return "";
+    const serialValue = String(state.serial || "").replace(/"/g, "&quot;");
+    return `
+          <div class="exclusive-code">
+            <form novalidate="novalidate" class="v-form" onsubmit="return false;">
+              <div class="label">遠傳優先購序號</div>
+              <div class="v-input theme--light v-text-field v-text-field--single-line v-text-field--filled v-text-field--is-booted v-text-field--enclosed v-text-field--outlined v-text-field--placeholder">
+                <div class="v-input__control">
+                  <div class="v-input__slot">
+                    <fieldset aria-hidden="true"><legend><span class="notranslate">&#8203;</span></legend></fieldset>
+                    <div class="v-text-field__slot">
+                      <input placeholder="請輸入遠傳優先購序號" type="text" value="${serialValue}" data-act="serial" autocomplete="off">
+                    </div>
+                  </div>
+                  <div class="v-text-field__details">
+                    <div class="v-messages theme--light"><div class="v-messages__wrapper"></div></div>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>`;
+  }
+
   function renderOrder(session) {
     const trees = AREA_TREE.map((g) => renderArea(g, true)).join("");
     const nextDisabled = canNextOrder() ? "" : "disabled";
-    const serialValue = String(state.serial || "").replace(/"/g, "&quot;");
     return `
       ${header()}
       <main class="v-main">
@@ -421,9 +464,7 @@
         <div class="cus-container seats-area">
           <div class="seats-title">票區一覽</div>
           <div class="v-expansion-panels">${trees}</div>
-          <div class="order-code-row">
-            <input type="text" value="${serialValue}" data-act="serial" autocomplete="off">
-          </div>
+          ${exclusiveCodeHtml()}
           <label class="agree-row"><input type="checkbox" data-act="agree" ${state.agreed ? "checked" : ""}> 我已閱讀並同意注意事項</label>
           <div class="order-footer">
             <div class="seat-mode">電腦選位</div>
@@ -592,7 +633,10 @@
           return;
         }
         if (act === "plus") {
-          state.selected[el.dataset.id] = Math.min(4, (state.selected[el.dataset.id] || 0) + 1);
+          const id = el.dataset.id;
+          const max = maxQtyFor(id);
+          if (max <= 0) return;
+          state.selected[id] = Math.min(max, (state.selected[id] || 0) + 1);
           saveState();
           render();
           return;

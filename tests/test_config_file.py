@@ -11,6 +11,7 @@ def test_example_config_loads(tmp_path: Path, monkeypatch):
     assert ticket.quantity >= 1
     assert cfg.bot_refresh_interval >= 200
     assert ticket.country_code == "+886"
+    assert ticket.require_exact_quantity is False
 
 
 def test_local_config_points_to_test_event():

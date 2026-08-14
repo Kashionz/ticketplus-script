@@ -85,6 +85,7 @@ class Config:
             session_exclude_keywords=list(self.get("ticket.session_exclude_keywords", []) or []),
             exclusive_code=self.get("ticket.exclusive_code", "") or "",
             fallback_first_available=bool(self.get("ticket.fallback_first_available", False)),
+            require_exact_quantity=bool(self.get("ticket.require_exact_quantity", False)),
             account=self.get("account.mobile", "") or self.get("account.account", "") or "",
             password=self.get("account.password", "") or "",
             country_code=self.get("account.country_code", "+886") or "+886",
@@ -98,6 +99,7 @@ class Config:
         self.set("ticket.session_exclude_keywords", ticket_config.session_exclude_keywords)
         self.set("ticket.exclusive_code", ticket_config.exclusive_code)
         self.set("ticket.fallback_first_available", ticket_config.fallback_first_available)
+        self.set("ticket.require_exact_quantity", ticket_config.require_exact_quantity)
         self.set("account.mobile", ticket_config.account)
         self.set("account.password", ticket_config.password)
         self.set("account.country_code", ticket_config.country_code or "+886")

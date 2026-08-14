@@ -107,6 +107,34 @@ _SALE_DATE_RE = re.compile(r"\d{4}[/-]\d{1,2}[/-]\d{1,2}")
 _SALE_TIME_RE = re.compile(r"\d{1,2}:\d{2}")
 
 
+_REMAIN_COUNT_RE = re.compile(r"剩餘\s*[:：]?\s*(\d+)")
+
+
+def parse_remaining_count(text: str) -> Optional[int]:
+    """從票區標題解析「剩餘 N」。熱賣中 / 沒寫數量則回 None。"""
+    blob = text or ""
+    if any(mark in blob for mark in ("已售完", "售罄", "售完")) and not re.search(r"剩餘\s*[1-9]", blob):
+        return 0
+    match = _REMAIN_COUNT_RE.search(blob)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def resolve_buy_quantity(want: int, remain: Optional[int], require_exact: bool) -> Optional[int]:
+    """指定張數與剩餘的取捨。None 表示這區不夠、應略過。"""
+    want = max(1, int(want or 1))
+    if remain is None:
+        return want
+    if remain <= 0:
+        return None
+    if remain >= want:
+        return want
+    if require_exact:
+        return None
+    return remain
+
+
 def classify_area_sale_text(text: str, has_quantity_control: bool = False) -> str:
     """依票區欄位判斷是否已開賣。
 

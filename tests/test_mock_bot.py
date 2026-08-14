@@ -44,6 +44,7 @@ def _make_bot(url: str, tmp_path, **kwargs) -> BotEngine:
         quantity=2,
         area_priorities=kwargs.pop("area_priorities", ["VIP3區", "VIP4區"]),
         fallback_first_available=kwargs.pop("fallback_first_available", False),
+        require_exact_quantity=kwargs.pop("require_exact_quantity", False),
         exclusive_code=kwargs.pop("exclusive_code", ""),
         account="0900000000",
         password="mock-pass",
@@ -120,11 +121,12 @@ def test_order_page_fills_serial_input_above_next(tmp_path):
                 page = OrderPage(driver)
                 assert page.wait_vue_ready(timeout=8)
                 assert page.select_area_and_quantity(["VIP3區"], 2)
+                assert page.has_exclusive_code_field()
                 assert page.fill_exclusive_code("FAR-PRIORITY-001")
                 page.agree_terms()
                 filled = page.execute_js(
                     """
-                    const input = document.querySelector('.order-code-row input, [data-act="serial"]');
+                    const input = document.querySelector('.exclusive-code input, [data-act="serial"]');
                     const footer = document.querySelector('.order-footer');
                     return {
                         value: input ? input.value : '',
@@ -217,6 +219,86 @@ def test_bot_fills_serial_then_buys_on_need_serial(tmp_path):
             message = bot.state.message
             bot.stop(close_browser=True)
             assert status == BotStatus.SUCCESS, message
+    except Exception as exc:
+        if "chrome" in str(exc).lower() or "chromedriver" in str(exc).lower():
+            pytest.skip(f"本機沒有可用的 Chrome: {exc}")
+        raise
+
+
+def test_order_page_buys_remaining_when_want_exceeds_stock(tmp_path):
+    try:
+        with mock_site(port=18773) as url:
+            origin = url.rsplit("/activity", 1)[0]
+            browser = BrowserManager(
+                headless=True,
+                user_data_dir=str(tmp_path / "chrome-remain"),
+                prefer_windows_chrome=False,
+                page_load_timeout=20,
+            )
+            try:
+                driver = browser.start()
+                driver.get(f"{origin}/order/{EVENT_ID}/{SESSION_919}?scenario=low-stock")
+                page = OrderPage(driver)
+                assert page.wait_vue_ready(timeout=8)
+                assert page.select_area_and_quantity(["VIP3區"], 2, require_exact_quantity=False)
+                qty = page.execute_js(
+                    """
+                    const panels = Array.from(document.querySelectorAll('.v-expansion-panel')).filter((p) =>
+                        p.querySelectorAll('.v-expansion-panel').length === 0
+                    );
+                    const vip = panels.find((p) => (p.innerText || '').includes('VIP3'));
+                    const box = vip && vip.querySelector('.count-button');
+                    const mid = box && Array.from(box.children).find((el) => el.tagName === 'DIV');
+                    const remain = vip && vip.querySelector('small.ml-1');
+                    const plus = box && box.querySelector('[data-act="plus"]');
+                    return {
+                        qty: mid ? parseInt(mid.textContent, 10) : -1,
+                        remain: remain ? remain.textContent.replace(/\\s+/g, ' ').trim() : '',
+                        limited: plus ? plus.getAttribute('data-limit') : '',
+                    };
+                    """
+                )
+                assert qty["qty"] == 1
+                assert "剩餘 1" in qty["remain"]
+                assert qty["limited"] == "true"
+            finally:
+                browser.stop()
+    except Exception as exc:
+        if "chrome" in str(exc).lower() or "chromedriver" in str(exc).lower():
+            pytest.skip(f"本機沒有可用的 Chrome: {exc}")
+        raise
+
+
+def test_order_page_skips_when_exact_quantity_required(tmp_path):
+    try:
+        with mock_site(port=18774) as url:
+            origin = url.rsplit("/activity", 1)[0]
+            browser = BrowserManager(
+                headless=True,
+                user_data_dir=str(tmp_path / "chrome-exact"),
+                prefer_windows_chrome=False,
+                page_load_timeout=20,
+            )
+            try:
+                driver = browser.start()
+                driver.get(f"{origin}/order/{EVENT_ID}/{SESSION_919}?scenario=low-stock")
+                page = OrderPage(driver)
+                assert page.wait_vue_ready(timeout=8)
+                assert not page.select_area_and_quantity(
+                    ["VIP3區", "VIP4區"],
+                    2,
+                    require_exact_quantity=True,
+                )
+                qty = page.execute_js(
+                    """
+                    const values = Array.from(document.querySelectorAll('.count-button div'))
+                        .map((el) => parseInt(el.textContent, 10));
+                    return values.filter((n) => Number.isFinite(n) && n > 0);
+                    """
+                )
+                assert qty == []
+            finally:
+                browser.stop()
     except Exception as exc:
         if "chrome" in str(exc).lower() or "chromedriver" in str(exc).lower():
             pytest.skip(f"本機沒有可用的 Chrome: {exc}")

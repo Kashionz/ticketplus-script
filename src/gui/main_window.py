@@ -121,6 +121,13 @@ class MainWindow(QMainWindow):
         self.quantity_spin.setValue(2)
         self.quantity_spin.setMinimumHeight(28)
         form.addRow("張數", self.quantity_spin)
+        self.exact_qty_check = QCheckBox("一定要買到指定張數（剩餘不足就繼續刷）")
+        self.exact_qty_check.setChecked(False)
+        self.exact_qty_check.setToolTip(
+            "不勾選：指定 2 張但票區只剩 1 張時，改買 1 張。\n"
+            "勾選：剩餘少於指定張數就不買，持續更新票數。"
+        )
+        form.addRow("", self.exact_qty_check)
         self.exclusive_code_input = self._line("遠傳優先購序號，沒有就留空")
         form.addRow("購票序號", self.exclusive_code_input)
         layout.addWidget(activity)
@@ -314,6 +321,7 @@ class MainWindow(QMainWindow):
             area_priorities=self._priorities(),
             exclusive_code=self.exclusive_code_input.text().strip(),
             fallback_first_available=self.fallback_first_check.isChecked(),
+            require_exact_quantity=self.exact_qty_check.isChecked(),
             account=self.account_input.text().strip(),
             password=self.password_input.text(),
             country_code="+886",
@@ -328,6 +336,7 @@ class MainWindow(QMainWindow):
             self.quantity_spin.setValue(ticket.quantity)
             self.exclusive_code_input.setText(ticket.exclusive_code)
             self.fallback_first_check.setChecked(ticket.fallback_first_available)
+            self.exact_qty_check.setChecked(ticket.require_exact_quantity)
             self.account_input.setText(ticket.account)
             self.password_input.setText(ticket.password)
             self.priority_list.clear()
@@ -475,6 +484,7 @@ class MainWindow(QMainWindow):
         self.activity_url_input.setEnabled(editable)
         self.target_session_input.setEnabled(editable)
         self.quantity_spin.setEnabled(editable)
+        self.exact_qty_check.setEnabled(editable)
         self.exclusive_code_input.setEnabled(editable)
         self.account_input.setEnabled(editable)
         self.password_input.setEnabled(editable)

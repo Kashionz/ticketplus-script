@@ -14,6 +14,8 @@ ticket:
   exclusive_code: ""
   # 優先票區沒票時，是否改買畫面上第一個可購。false=持續刷到優先票區有票
   fallback_first_available: false
+  # true=一定要買到指定張數（剩餘不足就繼續刷）；false=剩餘少於指定張數時改買剩餘
+  require_exact_quantity: false
   # 開賣與否改看購票頁票區欄位：顯示開賣時間=未開賣；可選數量或已售完=已開賣
 
   # ---- 正式目標：INFINITE RALLY V（搶票前改成下面這組）----

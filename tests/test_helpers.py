@@ -6,6 +6,8 @@ from src.utils.helpers import (
     clamp_parallel_windows,
     classify_area_sale_text,
     extract_event_id,
+    parse_remaining_count,
+    resolve_buy_quantity,
     extract_session_id,
     is_activity_url,
     is_confirm_url,
@@ -112,6 +114,28 @@ def test_ticket_config_validate_ok():
         quantity=2,
     )
     assert cfg.validate() == []
+
+
+def test_parse_remaining_count_from_official_header():
+    assert parse_remaining_count("VIP1區 剩餘 1 NT.6,100") == 1
+    assert parse_remaining_count("剩餘\n                          1") == 1
+    assert parse_remaining_count("VIP4區 剩餘 12") == 12
+    assert parse_remaining_count("特B3區 剩餘 0") == 0
+    assert parse_remaining_count("特B3區 熱賣中 NT.5,380") is None
+    assert parse_remaining_count("特B2區 已售完") == 0
+
+
+def test_resolve_buy_quantity_accepts_remaining_by_default():
+    assert resolve_buy_quantity(2, 1, require_exact=False) == 1
+    assert resolve_buy_quantity(2, 4, require_exact=False) == 2
+    assert resolve_buy_quantity(2, None, require_exact=False) == 2
+    assert resolve_buy_quantity(2, 0, require_exact=False) is None
+
+
+def test_resolve_buy_quantity_requires_exact_when_asked():
+    assert resolve_buy_quantity(2, 1, require_exact=True) is None
+    assert resolve_buy_quantity(2, 2, require_exact=True) == 2
+    assert resolve_buy_quantity(2, None, require_exact=True) == 2
 
 
 def test_classify_area_sale_text_from_order_page():

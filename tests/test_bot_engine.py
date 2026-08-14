@@ -110,3 +110,57 @@ def test_start_booking_without_browser_resets():
     assert bot.start_booking() is False
     assert bot.state.status == BotStatus.STOPPED
     assert bot._browser is None
+
+
+def _ready_order_bot() -> BotEngine:
+    bot = BotEngine(config=_ticket(), prefer_windows_chrome=False, wait_for_human=False)
+    order = MagicMock()
+    order.dismiss_failure_dialog.return_value = False
+    order.has_hold.return_value = False
+    order.wait_for_area_widgets.return_value = True
+    order.is_not_on_sale.return_value = False
+    order.select_area_and_quantity.return_value = True
+    order.next_enabled.return_value = True
+    order.click_next.return_value = True
+    order.has_exclusive_code_field.return_value = False
+    order.fill_exclusive_code.return_value = True
+    activity = MagicMock()
+    activity.has_recaptcha.return_value = False
+    activity.is_in_queue.return_value = False
+    bot._order = order
+    bot._activity = activity
+    return bot
+
+
+def test_process_order_fills_code_only_when_field_exists():
+    bot = _ready_order_bot()
+    bot.config.exclusive_code = "ArwPDDj"
+    bot._order.has_exclusive_code_field.return_value = True
+    assert bot._process_order() is True
+    bot._order.fill_exclusive_code.assert_called_once_with("ArwPDDj")
+
+
+def test_process_order_skips_code_when_field_absent():
+    bot = _ready_order_bot()
+    bot.config.exclusive_code = "ArwPDDj"
+    assert bot._process_order() is True
+    bot._order.fill_exclusive_code.assert_not_called()
+
+
+def test_process_order_waits_when_field_exists_but_code_missing():
+    bot = _ready_order_bot()
+    bot.config.exclusive_code = ""
+    bot._order.has_exclusive_code_field.return_value = True
+    assert bot._process_order() is False
+    bot._order.fill_exclusive_code.assert_not_called()
+    bot._order.click_next.assert_not_called()
+
+
+def test_process_order_passes_exact_quantity_flag():
+    bot = _ready_order_bot()
+    bot.config.require_exact_quantity = True
+    bot.config.quantity = 2
+    assert bot._process_order() is True
+    kwargs = bot._order.select_area_and_quantity.call_args.kwargs
+    assert kwargs["quantity"] == 2
+    assert kwargs["require_exact_quantity"] is True

@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--url", type=str, help="活動網址")
     parser.add_argument("--session", type=str, default="", help="場次關鍵字，例如 9/19")
     parser.add_argument("--quantity", type=int, help="購票張數")
+    parser.add_argument("--exact-quantity", action="store_true", help="一定要買到指定張數，剩餘不足就不買")
     parser.add_argument("--code", type=str, help="購票序號")
     parser.add_argument("--headless", action="store_true", help="隱藏瀏覽器")
     parser.add_argument("--attach", type=str, default="", help="接上 Windows Chrome，例如 127.0.0.1:9222")
@@ -86,6 +87,8 @@ def run_cli(args: argparse.Namespace) -> int:
         ticket.target_session = args.session
     if args.quantity:
         ticket.quantity = args.quantity
+    if args.exact_quantity:
+        ticket.require_exact_quantity = True
     if args.code:
         ticket.exclusive_code = args.code
 
@@ -98,7 +101,11 @@ def run_cli(args: argparse.Namespace) -> int:
 
     print("活動網址:", ticket.activity_url)
     print("場次關鍵字:", ticket.target_session or "(第一個可購場次)")
-    print("張數:", ticket.quantity)
+    print(
+        "張數:",
+        ticket.quantity,
+        "（一定要指定張數）" if ticket.require_exact_quantity else "（剩餘不足改買剩餘）",
+    )
     print("票區優先:", ticket.area_priorities or "(第一個可購)")
     print("購票序號:", "已設定" if ticket.exclusive_code else "(無)")
     print("開賣判斷: 購票頁票區欄位（開賣時間=未開賣；可選數量或已售完=已開賣）")

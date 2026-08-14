@@ -16,6 +16,7 @@ class TicketConfig:
     session_exclude_keywords: List[str] = field(default_factory=list)
     exclusive_code: str = ""
     fallback_first_available: bool = False
+    require_exact_quantity: bool = False
     account: str = ""
     password: str = ""
     country_code: str = "+886"
