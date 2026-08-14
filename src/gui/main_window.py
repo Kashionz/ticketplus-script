@@ -178,6 +178,15 @@ class MainWindow(QMainWindow):
         sys_form.addRow("", self.auto_agree_check)
         self.headless_check = QCheckBox("隱藏瀏覽器視窗")
         sys_form.addRow("", self.headless_check)
+        self.windows_spin = QSpinBox()
+        self.windows_spin.setRange(1, 3)
+        self.windows_spin.setValue(1)
+        self.windows_spin.setMinimumHeight(28)
+        self.windows_spin.setToolTip(
+            "1=只開目前這個 Chrome。2–3=開始搶票時再開獨立視窗，沿用現在的登入。"
+            "遠大可能擋同一帳號多開；其中一個進付款就會關掉其他視窗。"
+        )
+        sys_form.addRow("同時視窗", self.windows_spin)
         layout.addWidget(system)
         layout.addStretch(1)
 
@@ -327,6 +336,7 @@ class MainWindow(QMainWindow):
             self.refresh_interval_spin.setValue(self._config.bot_refresh_interval)
             self.auto_agree_check.setChecked(self._config.bot_auto_agree)
             self.headless_check.setChecked(self._config.browser_headless)
+            self.windows_spin.setValue(self._config.bot_parallel_windows)
             self.log_widget.info("設定載入完成")
         except Exception as exc:
             self.log_widget.warning(f"載入設定失敗: {exc}")
@@ -338,6 +348,7 @@ class MainWindow(QMainWindow):
             self._config.set_ticket_config(self._ticket_config())
             self._config.set("bot.refresh_interval", self.refresh_interval_spin.value())
             self._config.set("bot.auto_agree", self.auto_agree_check.isChecked())
+            self._config.set("bot.parallel_windows", self.windows_spin.value())
             self._config.set("browser.headless", self.headless_check.isChecked())
             self._config.save()
             self.log_widget.success("設定已儲存")
@@ -405,6 +416,7 @@ class MainWindow(QMainWindow):
                 debugger_address=cfg.browser_debugger_address,
                 chrome_binary=cfg.browser_chrome_binary,
                 prefer_windows_chrome=cfg.browser_prefer_windows_chrome,
+                parallel_windows=self.windows_spin.value(),
             )
             self._worker = BotWorker(self._bot_engine)
             self._worker.status_changed.connect(self._on_status)
@@ -427,6 +439,7 @@ class MainWindow(QMainWindow):
             config,
             refresh_interval=self.refresh_interval_spin.value(),
             auto_agree=self.auto_agree_check.isChecked(),
+            parallel_windows=self.windows_spin.value(),
         )
         return True
 
@@ -474,6 +487,7 @@ class MainWindow(QMainWindow):
         self.fallback_first_check.setEnabled(editable)
         self.refresh_interval_spin.setEnabled(editable)
         self.auto_agree_check.setEnabled(editable)
+        self.windows_spin.setEnabled(editable)
 
     @pyqtSlot(object)
     def _on_status(self, state: BotState) -> None:

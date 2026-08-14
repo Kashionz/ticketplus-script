@@ -56,6 +56,9 @@ bot:
   sound_notification: true
   # 遇到 reCAPTCHA / 3D 驗證時暫停，等你手動完成
   wait_for_human: true
+  # 同時開幾個獨立 Chrome（1–3）。登入做一次，開始搶票時複製登入狀態。
+  # 遠大可能擋同一帳號多視窗；一個進付款會關掉其他視窗。
+  parallel_windows: 1
 
 # ==================== 日誌設定 ====================
 logging:

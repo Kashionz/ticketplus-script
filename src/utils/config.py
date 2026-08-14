@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 import yaml
 
 from ..models.ticket_config import TicketConfig
+from .helpers import clamp_parallel_windows
 
 
 def get_app_path() -> Path:
@@ -159,6 +160,10 @@ class Config:
     @property
     def bot_wait_for_human(self) -> bool:
         return bool(self.get("bot.wait_for_human", True))
+
+    @property
+    def bot_parallel_windows(self) -> int:
+        return clamp_parallel_windows(self.get("bot.parallel_windows", 1))
 
     @property
     def logging_level(self) -> str:

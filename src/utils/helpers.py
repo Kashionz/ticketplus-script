@@ -182,6 +182,17 @@ def is_activity_url(url: str) -> bool:
     return bool(segs) and segs[0] == "activity"
 
 
+MAX_PARALLEL_WINDOWS = 3
+
+
+def clamp_parallel_windows(count: object) -> int:
+    try:
+        value = int(count)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(MAX_PARALLEL_WINDOWS, value))
+
+
 def is_login_url(url: str) -> bool:
     segs = url_path_segments(url)
     return bool(segs) and segs[0] in {"login", "signin", "sign-in"}

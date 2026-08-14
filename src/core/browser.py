@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
@@ -30,6 +31,7 @@ class BrowserManager:
         debugger_address: Optional[str] = None,
         chrome_binary: Optional[str] = None,
         prefer_windows_chrome: bool = True,
+        window_position: Optional[Tuple[int, int]] = None,
     ):
         self.driver_path = driver_path or ""
         self.headless = headless
@@ -39,6 +41,7 @@ class BrowserManager:
         self.debugger_address = (debugger_address or "").strip()
         self.chrome_binary = chrome_binary or ""
         self.prefer_windows_chrome = prefer_windows_chrome
+        self.window_position = window_position
         self._driver: Optional[WebDriver] = None
         self._attached = False
 
@@ -67,6 +70,10 @@ class BrowserManager:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument(f"--window-size={self.window_size[0]},{self.window_size[1]}")
+        if self.window_position:
+            options.add_argument(
+                f"--window-position={int(self.window_position[0])},{int(self.window_position[1])}"
+            )
         options.add_argument("--disable-popup-blocking")
         options.add_argument("--lang=zh-TW")
         if self.headless:
@@ -127,6 +134,50 @@ class BrowserManager:
         if not self._driver:
             raise RuntimeError("瀏覽器尚未啟動")
         self._driver.get(HOME_URL)
+
+    def export_cookies(self) -> List[Dict[str, Any]]:
+        if not self._driver:
+            return []
+        try:
+            return list(self._driver.get_cookies() or [])
+        except WebDriverException:
+            return []
+
+    def import_cookies(self, cookies: List[Dict[str, Any]], url: str) -> bool:
+        """先開同網域再寫 cookie，用來把已登入狀態複製到另一個 Chrome。"""
+        if not self._driver or not cookies:
+            return False
+        parsed = urlparse(url or HOME_URL)
+        origin = f"{parsed.scheme}://{parsed.netloc}/" if parsed.scheme and parsed.netloc else HOME_URL
+        self._driver.get(origin)
+        imported = 0
+        for raw in cookies:
+            cookie = {k: raw[k] for k in ("name", "value", "path", "secure") if k in raw}
+            if not cookie.get("name"):
+                continue
+            if "domain" in raw and raw["domain"]:
+                cookie["domain"] = raw["domain"]
+            if "expiry" in raw:
+                try:
+                    cookie["expiry"] = int(raw["expiry"])
+                except (TypeError, ValueError):
+                    pass
+            try:
+                self._driver.add_cookie(cookie)
+                imported += 1
+            except Exception:
+                cookie.pop("domain", None)
+                try:
+                    self._driver.add_cookie(cookie)
+                    imported += 1
+                except Exception:
+                    continue
+        target = url or origin
+        try:
+            self._driver.get(target)
+        except Exception:
+            self._driver.refresh()
+        return imported > 0
 
     def stop(self) -> None:
         if not self._driver:

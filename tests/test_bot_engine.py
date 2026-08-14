@@ -81,6 +81,28 @@ def test_ensure_login_ready_when_already_logged_in():
     assert bot._ensure_login() is False
 
 
+def test_prepare_parallel_windows_skipped_when_count_is_one():
+    bot = BotEngine(config=_ticket(), prefer_windows_chrome=False, parallel_windows=1)
+    bot._browser = MagicMock()
+    bot._browser.export_cookies.return_value = [{"name": "user", "value": "account=x"}]
+    bot._prepare_parallel_windows()
+    assert bot._extra_engines == []
+    bot._browser.export_cookies.assert_not_called()
+
+
+def test_declare_winner_stops_other_windows():
+    bot = BotEngine(config=_ticket(), prefer_windows_chrome=False, parallel_windows=2)
+    extra = MagicMock()
+    extra.window_index = 2
+    bot._extra_engines = [extra]
+    bot._declare_winner(1)
+    extra.stop.assert_called_once_with(close_browser=True)
+    assert bot._winner == 1
+    assert bot._extra_engines == []
+    bot._declare_winner(2)
+    extra.stop.assert_called_once()
+
+
 def test_start_booking_without_browser_resets():
     bot = BotEngine(config=_ticket(), prefer_windows_chrome=False)
     bot._browser = MagicMock()

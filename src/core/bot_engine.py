@@ -14,6 +14,7 @@ from ..pages.activity_page import ActivityPage
 from ..pages.login_page import LoginPage
 from ..pages.order_page import OrderPage
 from ..utils.helpers import (
+    clamp_parallel_windows,
     is_activity_url,
     is_confirm_url,
     is_login_url,
@@ -83,6 +84,8 @@ class BotEngine:
         debugger_address: str = "",
         chrome_binary: str = "",
         prefer_windows_chrome: bool = True,
+        parallel_windows: int = 1,
+        window_index: int = 1,
     ):
         self.config = config
         self.browser_headless = browser_headless
@@ -97,6 +100,8 @@ class BotEngine:
         self.debugger_address = debugger_address
         self.chrome_binary = chrome_binary
         self.prefer_windows_chrome = prefer_windows_chrome
+        self.parallel_windows = clamp_parallel_windows(parallel_windows)
+        self.window_index = max(1, int(window_index))
 
         self._state = BotState()
         self._stop_flag = threading.Event()
@@ -112,6 +117,9 @@ class BotEngine:
         self._last_advance_url = ""
         self._last_advance_at = 0.0
         self._logged_keys: set[str] = set()
+        self._extra_engines: List["BotEngine"] = []
+        self._winner_lock = threading.Lock()
+        self._winner: Optional[int] = None
 
     @property
     def state(self) -> BotState:
@@ -196,16 +204,20 @@ class BotEngine:
         config: TicketConfig,
         refresh_interval: Optional[int] = None,
         auto_agree: Optional[bool] = None,
+        parallel_windows: Optional[int] = None,
     ) -> None:
         self.config = config
         if refresh_interval is not None:
             self.refresh_interval = max(0.2, refresh_interval / 1000.0)
         if auto_agree is not None:
             self.auto_agree = auto_agree
+        if parallel_windows is not None:
+            self.parallel_windows = clamp_parallel_windows(parallel_windows)
 
     def stop(self, close_browser: bool = False) -> None:
         self._log("正在停止搶票...")
         self._update_state(status=BotStatus.STOPPING)
+        self._stop_extras(close_browser=close_browser)
         self._stop_flag.set()
         self._start_booking_flag.set()
         if self._thread and self._thread.is_alive():
@@ -229,6 +241,7 @@ class BotEngine:
 
     def trigger_start_booking(self) -> None:
         self._log("開始執行購票流程")
+        self._prepare_parallel_windows()
         self._start_booking_flag.set()
 
     def start_booking(self) -> bool:
@@ -251,7 +264,9 @@ class BotEngine:
         self._logged_keys.clear()
         self._last_advance_url = ""
         self._last_advance_at = 0.0
+        self._winner = None
         self._state = BotState(start_time=time.time(), status=BotStatus.RUNNING)
+        self._prepare_parallel_windows()
         self._thread = threading.Thread(target=self._run_booking, daemon=True)
         self._thread.start()
         return True
@@ -274,6 +289,108 @@ class BotEngine:
         self._activity = None
         self._order = None
         self._login = None
+
+    def _extra_profile_dir(self, index: int) -> str:
+        base = (self.user_data_dir or ".chrome-profile").rstrip("\\/")
+        return f"{base}-w{index}"
+
+    def _stop_extras(self, close_browser: bool = True) -> None:
+        extras = list(self._extra_engines)
+        self._extra_engines = []
+        for extra in extras:
+            try:
+                extra.stop(close_browser=close_browser)
+            except Exception:
+                pass
+
+    def _make_extra_engine(self, index: int) -> "BotEngine":
+        extra = BotEngine(
+            config=self.config,
+            browser_headless=self.browser_headless,
+            refresh_interval=int(self.refresh_interval * 1000),
+            max_retries=self.max_retries,
+            auto_agree=self.auto_agree,
+            wait_for_human=self.wait_for_human,
+            driver_path=self.driver_path,
+            user_data_dir=self._extra_profile_dir(index),
+            window_size=self.window_size,
+            page_load_timeout=self.page_load_timeout,
+            debugger_address="",
+            chrome_binary=self.chrome_binary,
+            prefer_windows_chrome=self.prefer_windows_chrome,
+            parallel_windows=1,
+            window_index=index,
+        )
+        extra.add_log_callback(lambda message, level, n=index: self._log(f"[視窗{n}] {message}", level))
+        extra.add_status_callback(lambda state, n=index: self._on_extra_status(state, n))
+        return extra
+
+    def _on_extra_status(self, state: BotState, index: int) -> None:
+        if state.status == BotStatus.SUCCESS:
+            self._declare_winner(index)
+
+    def _declare_winner(self, index: int) -> None:
+        with self._winner_lock:
+            if self._winner is not None:
+                return
+            self._winner = index
+        if index != self.window_index:
+            self._log(f"視窗 {index} 已進入付款頁，關閉其他視窗")
+            self._update_state(
+                status=BotStatus.SUCCESS,
+                step=BotStep.COMPLETE,
+                message=f"視窗 {index} 已進入付款頁，請手動完成付款",
+            )
+            self._stop_flag.set()
+        else:
+            self._log("這個視窗已進入付款頁，關閉其他視窗")
+        extras = list(self._extra_engines)
+        kept: List["BotEngine"] = []
+        for extra in extras:
+            if extra.window_index == index:
+                kept.append(extra)
+                continue
+            try:
+                extra.stop(close_browser=True)
+            except Exception:
+                pass
+        self._extra_engines = kept
+
+    def _prepare_parallel_windows(self) -> None:
+        count = clamp_parallel_windows(self.parallel_windows)
+        if count <= 1 or self.window_index != 1:
+            return
+        if not self.has_browser or not self._browser:
+            return
+        self._winner = None
+        self._stop_extras(close_browser=True)
+        cookies = self._browser.export_cookies()
+        if not cookies:
+            self._log("沒有可複製的登入狀態，只開原本的視窗", "WARNING")
+            return
+        self._log(
+            f"再開 {count - 1} 個獨立視窗搶同一場。遠大可能擋同一帳號多開；一個進付款會關掉其他視窗。",
+            "WARNING",
+        )
+        for index in range(2, count + 1):
+            extra = self._make_extra_engine(index)
+            if extra.bootstrap_session(cookies, self.config.activity_url):
+                extra.start_booking()
+                self._extra_engines.append(extra)
+                self._log(f"視窗 {index} 已開啟")
+            else:
+                extra.stop(close_browser=True)
+                self._log(f"視窗 {index} 啟動失敗", "WARNING")
+
+    def bootstrap_session(self, cookies: list, url: str) -> bool:
+        """給多開視窗用：開新 Chrome、寫入主視窗的 cookie。"""
+        if not self._initialize():
+            return False
+        assert self._browser
+        if not self._browser.import_cookies(cookies, url or "https://ticketplus.com.tw/"):
+            self._log("複製登入 cookie 失敗", "WARNING")
+            return False
+        return True
 
     def _note_browser_closed(self) -> None:
         self._log("瀏覽器已關閉，請重新按「啟動瀏覽器」", "WARNING")
@@ -303,7 +420,10 @@ class BotEngine:
     def _finish_after_execute(self, success: bool) -> None:
         if self._state.status == BotStatus.STOPPED and not self.has_browser:
             return
+        if self._winner and self._winner != self.window_index:
+            return
         if success:
+            self._declare_winner(self.window_index)
             self._update_state(
                 status=BotStatus.SUCCESS,
                 step=BotStep.COMPLETE,
@@ -415,6 +535,7 @@ class BotEngine:
                 debugger_address=self.debugger_address or None,
                 chrome_binary=self.chrome_binary or None,
                 prefer_windows_chrome=self.prefer_windows_chrome,
+                window_position=(40 + 80 * (self.window_index - 1), 40 + 40 * (self.window_index - 1)),
             )
             driver = self._browser.start()
             self._activity = ActivityPage(driver)

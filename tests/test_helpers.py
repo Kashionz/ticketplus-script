@@ -3,6 +3,7 @@ from pathlib import Path
 from src.models.ticket_config import TicketConfig
 from src.utils.helpers import (
     area_keyword_matches,
+    clamp_parallel_windows,
     classify_area_sale_text,
     extract_event_id,
     extract_session_id,
@@ -87,6 +88,15 @@ def test_area_keyword_matches_nested_zones():
 
 def test_normalize_text():
     assert normalize_text("VIP 3 區") == "vip3區"
+
+
+def test_clamp_parallel_windows():
+    assert clamp_parallel_windows(1) == 1
+    assert clamp_parallel_windows(3) == 3
+    assert clamp_parallel_windows(0) == 1
+    assert clamp_parallel_windows(9) == 3
+    assert clamp_parallel_windows("2") == 2
+    assert clamp_parallel_windows("nope") == 1
 
 
 def test_normalize_mobile_taiwan():

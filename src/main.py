@@ -120,6 +120,7 @@ def run_cli(args: argparse.Namespace) -> int:
         debugger_address=args.attach or config.browser_debugger_address,
         chrome_binary=config.browser_chrome_binary,
         prefer_windows_chrome=config.browser_prefer_windows_chrome,
+        parallel_windows=config.bot_parallel_windows,
     )
     bot.add_log_callback(lambda msg, level: print(f"[{level}] {msg}"))
     bot.start()
