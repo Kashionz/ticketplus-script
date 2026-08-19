@@ -69,6 +69,8 @@
 | 整合方式 | 同一 GUI，用網址自動判斷 `ticketplus` / `kktix` / `mock` |
 | 開賣瞬間 | 整點強制 F5 一次，不要只等畫面解鎖 |
 | 票種優先 | 沿用「票區優先級」清單，比對該列可見文字（可填 `3800` 或區名） |
+| 愛心票 | **一律排除**（名稱含愛心／身障／身心障礙／陪同）。價格對到也不買 |
+| 優先區暫無票券 | 未勾「改買第一個可購」時整頁重整；有勾則改買第一個非愛心可購種 |
 | 問答 | 停住等使用者，不自動填 |
 | 測試 | 單元測試 + 本機 KKTIX 模擬站；遠大既有測試必須繼續過 |
 
@@ -93,7 +95,7 @@ BotEngine
 
 | 模組 | 職責 | 依賴 |
 |------|------|------|
-| `src/utils/helpers.py` | `detect_platform`、`extract_kktix_slug`、KKTIX URL 分類、付款判定 | 無 |
+| `src/utils/helpers.py` | `detect_platform`、`extract_kktix_slug`、KKTIX URL 分類、付款判定、愛心票名稱判定 | 無 |
 | `src/models/ticket_config.py` | KKTIX 網址合法；slug 可解析；張數 1–4 | helpers |
 | `src/pages/kktix/registration_page.py` | 開賣／倒數、票種列、張數、條款、電腦配位、查詢空位、暫無票券 | BasePage |
 | `src/pages/kktix/login_page.py` | 偵測 KKTIX 登入表單；有帳密則填 Email／密碼 | BasePage |
@@ -129,7 +131,8 @@ BotEngine
     ├─ 「查詢空位中」／queue spinner ──► 停住，禁止 refresh、禁止重選
     ├─ 尚未開賣（COMING_SOON／倒數）──► 等到開賣時刻，整點 F5 一次
     ├─ 已開賣且尚未鎖票 ─────────────► 選票種／張數／勾條款／電腦配位
-    ├─ 暫無票券／優先種沒票 ─────────► 不整頁 F5；保留已填張數，間隔後再送
+    ├─ 優先種暫無票券且不走備選 ─────► 間隔後整頁 F5，重選優先種
+    ├─ 優先種沒票但允許備選 ─────────► 改買第一個非愛心可購種，不重整
     ├─ 已鎖票（劃位完成／填表／確認）─► 只按下一步，不重選、不重整
     └─ 付款頁／3D ──────────────────► SUCCESS
 ```
@@ -145,19 +148,23 @@ BotEngine
 5. 重整後若畫面仍未開賣（時鐘偏差）：之後才依 `refresh_interval` 再重整，直到出現可選數量或「已售完／暫無票券」。
 6. 一旦判定已開賣，**禁止再走「整點 F5」**。
 7. 查詢空位中、已鎖票、付款頁：**永遠不 F5**。
-
-開賣後「暫無票券」不整頁重整。張數與條款保持勾選，只再按電腦配位／下一步。這對應練習器與官方「離開本頁需重頭查詢空位」的警告。
+8. 開賣後、尚未鎖票時，優先種顯示「暫無票券」（或同等不可購）且 `fallback_first_available=false`：依 `refresh_interval` **整頁重整**，重整後重新選票。這與整點那一次 F5 分開，可重複直到選到或停止。
 
 ### 選票種與張數
 
 對每一列可見文字（票種名 + 價格 + 狀態）做與現有 `area_keyword_matches` 相同的正規化比對。
 
+**愛心票一律排除。** 列名含「愛心」「身障」「身心障礙」「陪同」的票種永不選入，即使優先級填了對應價格（例如 `1900`）、清單空白、或走備選第一個可購。
+
+其餘規則：
+
 - 優先級由上到下。使用者可填 `3800`、`3600`、或購票頁看得到的區名。
-- 清單空白：選第一個可購、且不是愛心／身障票的列。
-- `fallback_first_available=true`：優先列都沒票才改買第一個可購（仍跳過未指定的愛心票）。
-- `fallback_first_available=false`：優先列沒票就繼續等，不改買別種。
-- 張數：沿用 `resolve_buy_quantity`。剩餘不足且 `require_exact_quantity=false` 時改買剩餘；為 true 則跳過該列。
-- 愛心票只有優先級明確寫到（例如 `愛心`、`1900`）才選。
+- 清單空白：選第一個可購的非愛心列。
+- `fallback_first_available=true`：優先列都沒票（暫無票券／已售完／張數不夠）時，改買畫面上第一個可購的非愛心種，**不重整**。
+- `fallback_first_available=false`：優先列都沒票時**不改買別種**。若畫面是「暫無票券」或同等不可購，等 `refresh_interval` 後整頁 F5，再從頭比對優先級。
+- 畫面上所有非愛心種都不可購（無論是否勾備選）：同樣整頁 F5 等待釋票。
+- 張數：沿用 `resolve_buy_quantity`。剩餘不足且 `require_exact_quantity=false` 時改買剩餘；為 true 則視該列沒票，走上面備選／重整規則。
+- 已選定張數且下一步可按：送出，不要為了「再看有沒有更好的」而重整。
 - 有「電腦配位」按鈕時按它；沒有則按「下一步」。不要按「自行選位」。
 
 ### 鎖票後
@@ -189,7 +196,8 @@ BotEngine
 | `area_priorities` | 票種列文字／價格 |
 | `exclusive_code` | 僅當畫面出現邀請碼欄才填；否則忽略 |
 | `account` / `password` | KKTIX 登入為 Email + 密碼。GUI 標籤在偵測到 KKTIX 時改為「Email」 |
-| `fallback_first_available` / `require_exact_quantity` | 與遠大相同 |
+| `fallback_first_available` | `false`（預設）：優先種暫無票券就 F5 等待。`true`：改買第一個非愛心可購種 |
+| `require_exact_quantity` | 與遠大相同 |
 | `parallel_windows` | KKTIX 強制 1；GUI 鎖定並提示 |
 
 預設按鈕新增「載入 Atarayo」：
@@ -211,7 +219,10 @@ BotEngine
 | 活動問答 | 停住等使用者輸入，不解析題目 |
 | 查詢空位中 | 不 F5、不重選、不關頁 |
 | 流量管制／系統忙碌文案 | 等待 `refresh_interval` 後再試下一步；已鎖票則仍不重整 |
-| 暫無票券 | 保持張數與條款，重送電腦配位 |
+| 優先種暫無票券、未勾備選 | 尚未鎖票則整頁 F5，重選優先種 |
+| 優先種暫無票券、有勾備選 | 改買第一個非愛心可購種，不重整 |
+| 只有愛心票可購 | 視為沒有可購種，整頁 F5 |
+| 全部非愛心都暫無票券 | 整頁 F5 等待釋票 |
 | 購票失敗彈窗 | 關掉後若尚未鎖票，可重選；已鎖票則只往前 |
 | CSRF／官方要求重整 | 僅在尚未鎖票時跟隨官方重整 |
 | 瀏覽器被關 | 與遠大相同：結束並提示重新啟動瀏覽器 |
@@ -229,13 +240,13 @@ BotEngine
 | `test_config_file.py` | example 裡的 KKTIX 範例網址能通過 `TicketConfig.validate()` |
 | `test_kktix_api.py` | register_info 解析；離線 skip |
 | `test_kktix_mock_site.py` | 模擬站靜態路由與關鍵 DOM |
-| `test_kktix_mock_bot.py` | 對模擬站跑完：未開賣 → 整點後可購 → 選票 → 電腦配位 → 查詢空位 → 填表下一步 → 付款頁停止。無 Chrome 則 skip |
+| `test_kktix_mock_bot.py` | 對模擬站跑完：未開賣 → 整點後可購 → 選票 → 電腦配位 → 查詢空位 → 填表下一步 → 付款頁停止。另測：優先種暫無票券且無備選會重整；愛心票不會被選。無 Chrome 則 skip |
 
 KKTIX 模擬站掛在現有 `mock/server.py` 的另一組路由，不取代遠大模擬：
 
 - `http://127.0.0.1:8765/events/mock-kktix/registrations/new`
 - DOM 對齊官方：`#registrationsNewApp`、票種列、`#person_agree_terms`、「電腦配位」／「下一步」、「查詢空位中」、付款頁路徑 `/pay`
-- 場景：`presale`（倒數後開賣）、`happy`、`soldout-priority`、`queue`、`need-login`
+- 場景：`presale`（倒數後開賣）、`happy`、`priority-unavailable`（優先種暫無票券）、`queue`、`need-login`、`charity-only`（其餘售完只剩愛心票，必須跳過並重整）
 
 不把第三方練習器當 CI 依賴。練習器只供開發時手動對照節奏。
 
@@ -250,8 +261,9 @@ KKTIX 模擬站掛在現有 `mock/server.py` 的另一組路由，不取代遠�
 
 1. 貼上 `https://kktix.com/events/sbgr01/registrations/new`，GUI 以 KKTIX 模式運作，遠大活動仍走舊流程。
 2. 模擬站 `presale`：開賣前等待，開賣時刻 F5 一次，之後選票並進付款頁停止。
-3. 開賣後模擬「暫無票券」：不整頁重整，重送下一步。
-4. 查詢空位期間沒有 `driver.refresh()`。
-5. 有「自行選位」與「電腦配位」時只按電腦配位。
-6. `python -m pytest tests -q` 含遠大舊測試全過。
-7. 不呼叫任何建立訂單的隱藏 API；`register_info` 僅用於 inspect。
+3. 開賣後優先種「暫無票券」且未勾備選：會整頁重整；有勾備選則改買第一個非愛心可購種且不因備選而重整。
+4. 愛心／身障票種不會被選中（含清單空白、價格誤撞、備選第一個可購）。
+5. 查詢空位期間沒有 `driver.refresh()`。
+6. 有「自行選位」與「電腦配位」時只按電腦配位。
+7. `python -m pytest tests -q` 含遠大舊測試全過。
+8. 不呼叫任何建立訂單的隱藏 API；`register_info` 僅用於 inspect。
