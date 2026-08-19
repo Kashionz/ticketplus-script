@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 from src.models.ticket_config import TicketConfig
@@ -8,6 +9,8 @@ from src.utils.helpers import (
     detect_platform,
     extract_event_id,
     extract_kktix_slug,
+    parse_kktix_countdown_remaining,
+    parse_kktix_sale_at,
     parse_remaining_count,
     resolve_buy_quantity,
     extract_session_id,
@@ -27,6 +30,7 @@ from src.utils.helpers import (
     keyword_matches,
     normalize_mobile,
     normalize_text,
+    taipei_tz,
 )
 
 TEST_EVENT = "d1b4147aaeaa2e233f0fdc827cd55310"
@@ -229,3 +233,14 @@ def test_is_charity_ticket_name():
     assert is_charity_ticket_name("身心障礙席 TWD$1900")
     assert not is_charity_ticket_name("全票 TWD$3800")
     assert not is_charity_ticket_name("B2層電腦配位")
+
+
+def test_parse_kktix_sale_at_countdown_and_datetime():
+    now = 1_000_000.0
+    assert parse_kktix_sale_at("尚未開賣 3秒後開賣", now=now) == now + 3
+    assert parse_kktix_sale_at("尚未開賣，0 秒後開賣", now=now) == now
+    assert parse_kktix_countdown_remaining("尚未開賣 0秒後開賣") == 0
+    assert parse_kktix_countdown_remaining("熱賣中") is None
+    ts = parse_kktix_sale_at("全票 2026/09/05 12:00(+0800) ~ 2026/12/19 18:59(+0800)")
+    assert ts == datetime(2026, 9, 5, 12, 0, tzinfo=taipei_tz()).timestamp()
+    assert parse_kktix_sale_at("全票 TWD$3800") is None

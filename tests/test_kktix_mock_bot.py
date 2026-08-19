@@ -85,6 +85,22 @@ def test_kktix_bot_happy_reaches_pay(tmp_path):
         raise
 
 
+def test_kktix_bot_presale_reaches_pay_after_sale_f5(tmp_path):
+    try:
+        with mock_kktix_site(port=18783) as url:
+            bot = _make_bot(url + "?scenario=presale&saleAfter=2", tmp_path)
+            _start_or_skip(bot)
+            bot.trigger_start_booking()
+            status = _wait_bot(bot, timeout=55)
+            message = bot.state.message
+            bot.stop(close_browser=True)
+            assert status == BotStatus.SUCCESS, message
+    except Exception as exc:
+        if "chrome" in str(exc).lower() or "chromedriver" in str(exc).lower():
+            pytest.skip(f"本機沒有可用的 Chrome: {exc}")
+        raise
+
+
 def test_kktix_bot_skips_charity_and_refreshes_priority(tmp_path):
     try:
         with mock_kktix_site(port=18782) as url:

@@ -44,12 +44,12 @@ def pick_kktix_ticket(
     fallback_first_available: bool,
     require_exact_quantity: bool,
 ) -> KktixPick:
-    if not rows:
-        return KktixPick("wait_sale")
-    if rows and all(r.status == "not_on_sale" for r in rows):
+    eligible = _eligible(rows)
+    started = {"on_sale", "unavailable", "sold_out"}
+    if not rows or not any(r.status in started for r in eligible):
+        # 表頭／unknown 列不代表已開賣，避免開賣前被當成 refresh 狂 F5
         return KktixPick("wait_sale")
 
-    eligible = _eligible(rows)
     want = max(1, int(quantity or 1))
 
     def first_buyable(pool: Sequence[KktixTicketRow]) -> Optional[tuple]:

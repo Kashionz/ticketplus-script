@@ -247,6 +247,51 @@ def is_mock_url(url: str) -> bool:
 
 
 KKTIX_CHARITY_MARKERS = ("愛心", "身障", "身心障礙", "陪同")
+_KKTIX_COUNTDOWN_RE = re.compile(r"(\d+)\s*秒後開賣")
+_KKTIX_DT_RE = re.compile(
+    r"(20\d{2})[/-](\d{1,2})[/-](\d{1,2})"
+    r"[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?"
+    r"(?:\s*\(\+0?8:?00\))?"
+)
+
+
+def parse_kktix_countdown_remaining(text: str) -> Optional[float]:
+    """從「N秒後開賣」取出剩餘秒數。沒有倒數則回 None。"""
+    matches = [int(m.group(1)) for m in _KKTIX_COUNTDOWN_RE.finditer(text or "")]
+    if not matches:
+        return None
+    return float(min(matches))
+
+
+def parse_kktix_sale_at(text: str, now: Optional[float] = None) -> Optional[float]:
+    """把購票頁看得到的開賣時間轉成 unix seconds（Asia/Taipei）。
+
+    優先「N秒後開賣」，否則解析日期＋時間。讀不到則回 None。
+    """
+    now = time.time() if now is None else float(now)
+    remaining = parse_kktix_countdown_remaining(text)
+    if remaining is not None:
+        return now + remaining
+    earliest: Optional[float] = None
+    tz = taipei_tz()
+    for match in _KKTIX_DT_RE.finditer(text or ""):
+        try:
+            dt = datetime(
+                int(match.group(1)),
+                int(match.group(2)),
+                int(match.group(3)),
+                int(match.group(4)),
+                int(match.group(5)),
+                int(match.group(6) or 0),
+                tzinfo=tz,
+            )
+        except ValueError:
+            continue
+        ts = dt.timestamp()
+        if earliest is None or ts < earliest:
+            earliest = ts
+    return earliest
+
 
 
 def detect_platform(url: str) -> str:

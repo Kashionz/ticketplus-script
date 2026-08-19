@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from selenium.webdriver.remote.webdriver import WebDriver
 
 from ...core.kktix_select import KktixTicketRow
+from ...utils.helpers import parse_kktix_countdown_remaining, parse_kktix_sale_at
 from ..base_page import BasePage
 
 logger = logging.getLogger("ticketplus")
@@ -17,6 +19,8 @@ function visible(el) {
     if (!el) return false;
     if (el.hidden) return false;
     if (el.closest && el.closest('[hidden]')) return false;
+    if (el.classList && el.classList.contains('ng-hide')) return false;
+    if (el.closest && el.closest('.ng-hide')) return false;
     const style = window.getComputedStyle(el);
     const box = el.getBoundingClientRect();
     if (style.visibility === 'hidden' || style.display === 'none') return false;
@@ -25,7 +29,28 @@ function visible(el) {
 }
 """
 
-_JS_COLLECT_ROWS = """
+_JS_SALE_HINT = """
+function saleAtAttr() {
+    const el = document.querySelector('#sale-countdown[data-sale-at], [data-sale-at]');
+    if (!el) return null;
+    const n = Number(el.getAttribute('data-sale-at'));
+    return Number.isFinite(n) && n > 0 ? n : null;
+}
+function saleHintText() {
+    const chunks = [];
+    const countdown = document.querySelector('#sale-countdown');
+    if (countdown) chunks.push(countdown.innerText || '');
+    const nodes = document.querySelectorAll(
+        '[data-ticket-row], #registrationsNewApp .display-table-row, .period-time, .timezoneSuffix'
+    );
+    for (const n of nodes) chunks.push(n.innerText || '');
+    const body = document.body ? (document.body.innerText || '') : '';
+    chunks.push(body);
+    return chunks.join('\\n').slice(0, 8000);
+}
+"""
+
+_JS_COLLECT_ROWS = _JS_VISIBLE + """
 function collectTicketRows() {
     const seen = new Set();
     const nodes = [];
@@ -45,16 +70,26 @@ function parseRemain(text) {
     return null;
 }
 
+function hasVisibleQty(el) {
+    if (!el) return false;
+    const nodes = el.querySelectorAll(
+        '[data-act="plus"], input.ticket-quantity, .ticket-quantity, [ng-click*="quantityPlus"], [ng-click*="plus"]'
+    );
+    for (const n of nodes) {
+        if (visible(n)) return true;
+    }
+    return false;
+}
+
 function classifyStatus(el) {
     const text = ((el && el.innerText) || '').replace(/\\s+/g, ' ');
     const attr = String((el && el.getAttribute('data-status')) || '').trim();
-    const hasPlus = Boolean(el && el.querySelector(
-        '[data-act="plus"], input.ticket-quantity, .ticket-quantity, [ng-click*="quantityPlus"], [ng-click*="plus"]'
-    ));
+    const hasPlus = hasVisibleQty(el);
     if (/尚未開賣|秒後開賣/.test(text)) return 'not_on_sale';
     if (text.includes('暫無票券')) return 'unavailable';
     if (text.includes('已售完') || /售罄/.test(text)) return 'sold_out';
     if (hasPlus || /熱賣|剩/.test(text)) return 'on_sale';
+    if (/\\d{4}[\\/-]\\d{1,2}[\\/-]\\d{1,2}/.test(text) && /\\d{1,2}:\\d{2}/.test(text)) return 'not_on_sale';
     if (['not_on_sale', 'unavailable', 'sold_out', 'on_sale'].indexOf(attr) >= 0) return attr;
     return 'unknown';
 }
@@ -99,7 +134,7 @@ class KktixRegistrationPage(BasePage):
                 const status = classifyStatus(el);
                 const remaining = parseRemain(el.innerText || '');
                 rows.push({
-                    index: rows.length,
+                    index: i,
                     name: name,
                     price_text: price_text,
                     status: status,
@@ -159,21 +194,38 @@ class KktixRegistrationPage(BasePage):
             return str(result)
         return "unknown"
 
-    def sale_at_epoch(self) -> Optional[float]:
-        value = self.execute_js(
-            """
-            const el = document.querySelector('#sale-countdown[data-sale-at], [data-sale-at]');
-            if (!el) return null;
-            const n = Number(el.getAttribute('data-sale-at'));
-            return Number.isFinite(n) && n > 0 ? n : null;
+    def _sale_hint(self) -> Dict[str, Any]:
+        result = self.execute_js(
+            _JS_SALE_HINT
+            + """
+            return {attr: saleAtAttr(), text: saleHintText()};
             """
         )
-        if value is None:
+        return result if isinstance(result, dict) else {}
+
+    def sale_at_epoch(self) -> Optional[float]:
+        info = self._sale_hint()
+        attr = info.get("attr") if isinstance(info, dict) else None
+        if attr is not None:
+            try:
+                value = float(attr)
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        text = str((info or {}).get("text") or "")
+        return parse_kktix_sale_at(text, now=time.time())
+
+    def sale_countdown_remaining(self) -> Optional[float]:
+        info = self._sale_hint()
+        text = str((info or {}).get("text") or "")
+        remaining = parse_kktix_countdown_remaining(text)
+        if remaining is not None:
+            return remaining
+        sale_at = self.sale_at_epoch()
+        if sale_at is None:
             return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+        return sale_at - time.time()
 
     def is_queue(self) -> bool:
         return bool(
@@ -300,10 +352,19 @@ class KktixRegistrationPage(BasePage):
                 return textOf(el).includes('自行選位');
             }
             const buttons = Array.from(document.querySelectorAll('button, a.btn, .btn, [data-act]'));
-            const auto = buttons.find((b) => enabled(b) && !isSelfSeat(b) && textOf(b).includes('電腦配位'));
-            if (auto) {
-                auto.click();
-                return 'auto';
+            function isComputerAssign(el) {
+                if (!el || isSelfSeat(el)) return false;
+                if ((el.getAttribute('data-act') || '') === 'auto-seat') return true;
+                return textOf(el).includes('電腦配位');
+            }
+            const assignBtns = buttons.filter((b) => isComputerAssign(b) && visible(b));
+            if (assignBtns.length) {
+                const auto = assignBtns.find(enabled);
+                if (auto) {
+                    auto.click();
+                    return 'auto';
+                }
+                return '';
             }
             const area = document.querySelector('.register-new-next-button-area') || document;
             const nextCandidates = Array.from(area.querySelectorAll('button, a.btn, .btn, [data-act="next"]'));

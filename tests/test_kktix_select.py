@@ -28,6 +28,26 @@ def test_wait_sale_when_all_not_on_sale():
     assert pick.action == "wait_sale"
 
 
+def test_wait_sale_ignores_unknown_header_rows():
+    rows = [
+        _row(0, "票種", "", "unknown", purchasable=False),
+        _row(1, "全票", "3800", "not_on_sale", purchasable=False),
+        _row(2, "全票", "3600", "not_on_sale", purchasable=False),
+    ]
+    pick = pick_kktix_ticket(rows, ["3800"], 2, False, False)
+    assert pick.action == "wait_sale"
+
+
+def test_unknown_header_does_not_block_refresh_after_sale():
+    rows = [
+        _row(0, "票種", "", "unknown", purchasable=False),
+        _row(1, "全票", "3800", "unavailable"),
+        _row(2, "全票", "3600", "on_sale"),
+    ]
+    pick = pick_kktix_ticket(rows, ["3800"], 2, False, False)
+    assert pick.action == "refresh"
+
+
 def test_refresh_when_priority_unavailable_without_fallback():
     pick = pick_kktix_ticket(_atarayo("unavailable"), ["3800"], 2, False, False)
     assert pick.action == "refresh"

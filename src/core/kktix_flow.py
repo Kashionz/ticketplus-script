@@ -99,7 +99,10 @@ class KktixFlow:
                 continue
 
             if is_kktix_registration_url(url):
-                if self._process_registration():
+                result = self._process_registration()
+                if result == "wait_sale":
+                    continue
+                if result:
                     e._sleep(0.8)
                 retries += 1
                 continue
@@ -200,8 +203,13 @@ class KktixFlow:
         if self._checkout.click_advance():
             self._last_advance_url = url
             self._last_advance_at = now
+        else:
+            e._log_once(
+                "kktix-prefill",
+                "下一步無法點擊。請到 https://kktix.com/account/prefills 填寫報名預填資料，或在本頁手動補齊；填完後程式會繼續按下一步",
+            )
 
-    def _process_registration(self) -> bool:
+    def _process_registration(self) -> bool | str:
         assert self._reg
         e = self.engine
         cfg = e.config
@@ -216,7 +224,7 @@ class KktixFlow:
 
         if pick.action == "wait_sale":
             self._wait_sale()
-            return False
+            return "wait_sale"
 
         if pick.action == "refresh":
             e._update_state(step=BotStep.SELECT_AREA, message="優先票種暫無票券，重整等待")
@@ -235,15 +243,18 @@ class KktixFlow:
         e._update_state(step=BotStep.SELECT_AREA, message="選擇票種 / 張數")
         if not self._reg.set_quantity(pick.index, pick.quantity):
             e._log("設定張數失敗，稍後再試")
+            e._sleep()
             return False
 
         if self._reg.has_invitation_field():
             code = (cfg.exclusive_code or "").strip()
             if not code:
                 e._log_once("kktix-need-code", "購票頁出現邀請碼欄，但設定未填序號")
+                e._sleep()
                 return False
             if not self._reg.fill_invitation(code):
                 e._log_once("kktix-fill-code-fail", "找到邀請碼欄但填入失敗")
+                e._sleep()
                 return False
 
         if e.auto_agree:
@@ -252,6 +263,7 @@ class KktixFlow:
         e._update_state(step=BotStep.SUBMIT, message="送出電腦配位")
         if not self._reg.click_computer_assign():
             e._log("電腦配位 / 下一步尚未可按，稍後再試")
+            e._sleep()
             return False
         return True
 
@@ -260,9 +272,14 @@ class KktixFlow:
         e = self.engine
         e._update_state(step=BotStep.WAIT_SALE, message="尚未開賣，等待開賣時刻")
         sale_at = self._reg.sale_at_epoch()
+        remaining = self._reg.sale_countdown_remaining()
         now = time.time()
         if not self._did_sale_refresh:
-            due = sale_at is not None and now >= sale_at
+            due = False
+            if sale_at is not None:
+                due = now >= sale_at
+            elif remaining is not None:
+                due = remaining <= 0
             if due:
                 e._log("開賣時刻已到，重整一次")
                 self._safe_refresh()
@@ -270,6 +287,8 @@ class KktixFlow:
                 return
             if sale_at is not None:
                 e._sleep(min(e.refresh_interval, max(0.05, sale_at - now)))
+            elif remaining is not None and remaining > 0:
+                e._sleep(min(e.refresh_interval, max(0.05, remaining)))
             else:
                 e._sleep()
             return
