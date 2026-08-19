@@ -27,3 +27,10 @@ def mock_origin(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> str:
 
 def mock_activity_url(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> str:
     return f"{mock_origin(host, port)}/activity/{EVENT_ID}"
+
+
+KKTIX_SLUG = "mock-kktix"
+
+
+def mock_kktix_url(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> str:
+    return f"http://{host}:{port}/events/{KKTIX_SLUG}/registrations/new"

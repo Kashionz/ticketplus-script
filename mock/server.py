@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
-from .catalog import DEFAULT_HOST, DEFAULT_PORT, EVENT_ID, mock_activity_url
+from .catalog import DEFAULT_HOST, DEFAULT_PORT, EVENT_ID, mock_activity_url, mock_kktix_url
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 APP_PREFIXES = (
@@ -52,6 +52,15 @@ class MockHandler(SimpleHTTPRequestHandler):
                     ],
                 }
             )
+            return
+        if path.startswith("/events/") or path in {"/users/sign_in", "/kktix.js"}:
+            if path.endswith("/kktix.js") or path == "/kktix.js":
+                self._send_file(STATIC_DIR / "kktix.js", "application/javascript; charset=utf-8")
+                return
+            if path.endswith("/pay"):
+                self._send_file(STATIC_DIR / "kktix.html", "text/html; charset=utf-8")
+                return
+            self._send_file(STATIC_DIR / "kktix.html", "text/html; charset=utf-8")
             return
         if path == "/" or path == "/control" or any(lower.startswith(p) for p in APP_PREFIXES):
             self._send_file(STATIC_DIR / "index.html", "text/html; charset=utf-8")
@@ -96,8 +105,10 @@ def main(argv: Optional[list] = None) -> int:
     args = parser.parse_args(argv)
     server, _thread = start_mock_server(args.host, args.port)
     print(f"模擬站已啟動: {mock_activity_url(args.host, args.port)}")
+    print(f"KKTIX: {mock_kktix_url(args.host, args.port)}")
     print("場景可在頁面上方切換，或加 ?scenario=presale&saleAfter=2")
     print("可用場景: happy / presale / priority-soldout / stock-later / low-stock / need-login / need-serial / queue / fail-once / overlay")
+    print("KKTIX 場景: happy / presale / priority-unavailable / queue / need-login / charity-only")
     print("Ctrl+C 結束")
     try:
         while True:

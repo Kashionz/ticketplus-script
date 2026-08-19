@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KKTIX</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif; background: #f6f6f6; color: #222; }
+    #app { max-width: 920px; margin: 0 auto; padding: 16px; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .brand { font-weight: 700; color: #c41230; letter-spacing: 0.04em; }
+    .ticket-table { width: 100%; background: #fff; border: 1px solid #ddd; }
+    .display-table-row { display: grid; grid-template-columns: 2fr 1fr 1.4fr 1.2fr; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #eee; align-items: center; }
+    .qty { display: inline-flex; align-items: center; gap: 6px; }
+    .qty button, button { cursor: pointer; }
+    input.ticket-quantity { width: 48px; text-align: center; }
+    .register-new-next-button-area { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    button[data-act="auto-seat"], button[data-act="next"], #login-form button { background: #c41230; color: #fff; border: 0; padding: 8px 16px; }
+    button[data-act="self-seat"] { background: #fff; border: 1px solid #c41230; color: #c41230; padding: 8px 16px; }
+    #queue-spinner { display: none; margin: 24px 0; padding: 24px; background: #fff; border: 1px solid #c41230; text-align: center; font-size: 18px; }
+    #queue-spinner.is-visible { display: block; }
+    #sale-countdown { margin: 8px 0 16px; color: #c41230; }
+    #login-form, #pay-app, .held-box { background: #fff; padding: 24px; border: 1px solid #ddd; }
+    #login-form label, #pay-app label { display: block; margin: 8px 0; }
+    .status-unavailable { color: #888; }
+    .status-onsale { color: #c41230; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="registrationsNewApp">
+      <label><input type="checkbox" id="person_agree_terms"> 我已閱讀並同意服務條款</label>
+      <div class="register-new-next-button-area">
+        <button type="button" data-act="self-seat">自行選位</button>
+        <button type="button" data-act="auto-seat">電腦配位</button>
+        <button type="button" data-act="next">下一步</button>
+      </div>
+    </div>
+    <div id="pay-app" hidden>
+      <h1>付款</h1>
+      <input name="cardNumber" autocomplete="cc-number">
+    </div>
+  </div>
+  <script src="/kktix.js"></script>
+</body>
+</html>

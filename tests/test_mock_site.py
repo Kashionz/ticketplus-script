@@ -31,3 +31,23 @@ def test_mock_server_serves_activity_and_order(tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_kktix_mock_routes():
+    server, _thread = start_mock_server(port=18767)
+    try:
+        origin = "http://127.0.0.1:18767"
+        html = urlopen(origin + "/events/mock-kktix/registrations/new", timeout=5).read().decode("utf-8")
+        assert "registrationsNewApp" in html
+        assert "person_agree_terms" in html
+        assert "電腦配位" in html
+        assert "自行選位" in html
+        js = urlopen(origin + "/kktix.js", timeout=5).read().decode("utf-8")
+        assert "暫無票券" in js
+        assert "priority-unavailable" in js
+        assert "charity-only" in js
+        pay = urlopen(origin + "/events/mock-kktix/registrations/held1/pay", timeout=5).read().decode("utf-8")
+        assert "cardNumber" in pay
+    finally:
+        server.shutdown()
+        server.server_close()
