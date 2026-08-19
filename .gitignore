@@ -20,3 +20,5 @@ build/
 *.egg-info/
 config/config.yaml
 mock/static/vendor/
+
+.worktrees/
