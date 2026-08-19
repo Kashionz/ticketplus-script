@@ -27,6 +27,18 @@ ticket:
   #   - "VIP4區"
   # exclusive_code: ""              # 遠傳 / friDay 優先購序號
 
+  # ---- KKTIX：Atarayo ASIA TOUR 2026（電腦配位；account 請填 Email）----
+  # activity_url: "https://kktix.com/events/sbgr01/registrations/new"
+  # target_session: ""              # KKTIX 不使用場次關鍵字
+  # quantity: 2
+  # area_priorities:
+  #   - "3800"
+  #   - "3600"
+  #   - "3200"
+  # exclusive_code: ""              # 僅畫面有邀請碼欄時才填
+  # fallback_first_available: false
+  # require_exact_quantity: false
+
 # ==================== 帳號（被登出時自動重登；已登入則略過）====================
 account:
   mobile: ""

@@ -42,12 +42,17 @@ def parse_args() -> argparse.Namespace:
 def run_inspect(args: argparse.Namespace) -> int:
     from src.api.event_api import fetch_event_catalog, format_catalog
     from src.utils.config import get_config
-    from src.utils.helpers import extract_event_id
+    from src.utils.helpers import detect_platform, extract_event_id
 
     url = args.url
     if not url:
         config = get_config(args.config)
         url = config.get_ticket_config().activity_url
+    if detect_platform(url or "") == "kktix":
+        from src.api.kktix_api import fetch_kktix_catalog
+
+        print(fetch_kktix_catalog(url or ""))
+        return 0
     event_id = extract_event_id(url or "")
     if not event_id:
         print("請提供有效的 TicketPlus 活動網址")

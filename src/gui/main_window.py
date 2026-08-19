@@ -29,12 +29,27 @@ from PyQt6.QtWidgets import (
 from ..core.bot_engine import BotEngine, BotState, BotStatus
 from ..models.ticket_config import TicketConfig
 from ..utils.config import Config, get_config
+from ..utils.helpers import detect_platform
 from .log_widget import LogWidget
 from .status_widget import StatusWidget
 
 TEST_EVENT = "https://ticketplus.com.tw/activity/4b47b5360d42451f65704664c40b1c72"
 TARGET_EVENT = "https://ticketplus.com.tw/activity/af39103d211724c82069c4ab5e40e95c"
 MOCK_EVENT = "http://127.0.0.1:8765/activity/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+KKTIX_ATARAYO = "https://kktix.com/events/sbgr01/registrations/new"
+KKTIX_MOCK = "http://127.0.0.1:8765/events/mock-kktix/registrations/new"
+
+_SESSION_PLACEHOLDER_TP = "例如 9/19；空白=第一個可購場次"
+_SESSION_PLACEHOLDER_KKTIX = "KKTIX 不使用場次關鍵字"
+_CODE_PLACEHOLDER_TP = "遠傳優先購序號，沒有就留空"
+_CODE_PLACEHOLDER_KKTIX = "KKTIX 邀請碼，沒有就留空"
+_ACCOUNT_PLACEHOLDER_TP = "09xxxxxxxx"
+_ACCOUNT_PLACEHOLDER_KKTIX = "Email"
+_WINDOWS_TIP_TP = (
+    "1=只開目前這個 Chrome。2–3=開始搶票時再開獨立視窗，沿用現在的登入。"
+    "遠大可能擋同一帳號多開；其中一個進付款就會關掉其他視窗。"
+)
+_WINDOWS_TIP_KKTIX = "KKTIX 不支援同時多視窗，固定為 1"
 
 
 class BotWorker(QThread):
@@ -61,6 +76,7 @@ class MainWindow(QMainWindow):
         self._config: Optional[Config] = None
         self._bot_engine: Optional[BotEngine] = None
         self._worker: Optional[BotWorker] = None
+        self._ui_editable = True
         self.setWindowTitle("TicketPlus 購票助手")
         self.setMinimumSize(1100, 720)
         self.resize(1200, 800)
@@ -88,6 +104,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         root.addWidget(splitter, stretch=1)
         root.addWidget(self._buttons())
+        self.activity_url_input.textChanged.connect(self._apply_platform_ui)
 
     def _left_panel(self) -> QWidget:
         inner = QWidget()
@@ -114,7 +131,18 @@ class MainWindow(QMainWindow):
         preset.addWidget(target_btn)
         preset.addWidget(mock_btn)
         form.addRow("", preset_box)
-        self.target_session_input = self._line("例如 9/19；空白=第一個可購場次")
+        kktix_box = QWidget()
+        kktix_row = QHBoxLayout(kktix_box)
+        kktix_row.setContentsMargins(0, 0, 0, 0)
+        atarayo_btn = QPushButton("載入 Atarayo")
+        atarayo_btn.clicked.connect(self._load_atarayo)
+        kktix_mock_btn = QPushButton("載入 KKTIX 模擬")
+        kktix_mock_btn.clicked.connect(self._load_kktix_mock)
+        kktix_row.addWidget(atarayo_btn)
+        kktix_row.addWidget(kktix_mock_btn)
+        kktix_row.addStretch(1)
+        form.addRow("", kktix_box)
+        self.target_session_input = self._line(_SESSION_PLACEHOLDER_TP)
         form.addRow("場次", self.target_session_input)
         self.quantity_spin = QSpinBox()
         self.quantity_spin.setRange(1, 4)
@@ -128,7 +156,7 @@ class MainWindow(QMainWindow):
             "勾選：剩餘少於指定張數就不買，持續更新票數。"
         )
         form.addRow("", self.exact_qty_check)
-        self.exclusive_code_input = self._line("遠傳優先購序號，沒有就留空")
+        self.exclusive_code_input = self._line(_CODE_PLACEHOLDER_TP)
         form.addRow("購票序號", self.exclusive_code_input)
         layout.addWidget(activity)
 
@@ -136,8 +164,9 @@ class MainWindow(QMainWindow):
         acc = QFormLayout(account)
         acc.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
         acc.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.account_input = self._line("09xxxxxxxx")
-        acc.addRow("手機", self.account_input)
+        self.account_input = self._line(_ACCOUNT_PLACEHOLDER_TP)
+        self.account_label = QLabel("手機")
+        acc.addRow(self.account_label, self.account_input)
         self.password_input = self._line("已登入可留空")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         acc.addRow("密碼", self.password_input)
@@ -189,10 +218,7 @@ class MainWindow(QMainWindow):
         self.windows_spin.setRange(1, 3)
         self.windows_spin.setValue(1)
         self.windows_spin.setMinimumHeight(28)
-        self.windows_spin.setToolTip(
-            "1=只開目前這個 Chrome。2–3=開始搶票時再開獨立視窗，沿用現在的登入。"
-            "遠大可能擋同一帳號多開；其中一個進付款就會關掉其他視窗。"
-        )
+        self.windows_spin.setToolTip(_WINDOWS_TIP_TP)
         sys_form.addRow("同時視窗", self.windows_spin)
         layout.addWidget(system)
         layout.addStretch(1)
@@ -283,6 +309,46 @@ class MainWindow(QMainWindow):
         self.priority_list.addItem("VIP4區")
         self.log_widget.info("已載入本機模擬站。請先另開終端機執行：python -m mock.server")
 
+    def _load_atarayo(self) -> None:
+        self.activity_url_input.setText(KKTIX_ATARAYO)
+        self.target_session_input.clear()
+        self.quantity_spin.setValue(2)
+        self.exclusive_code_input.clear()
+        self.priority_list.clear()
+        self.priority_list.addItem("3800")
+        self.priority_list.addItem("3600")
+        self.priority_list.addItem("3200")
+        self.log_widget.info("已載入 Atarayo：張數 2、優先 3800/3600/3200。KKTIX 同時視窗固定 1。")
+
+    def _load_kktix_mock(self) -> None:
+        self.activity_url_input.setText(KKTIX_MOCK)
+        self.target_session_input.clear()
+        self.quantity_spin.setValue(2)
+        self.exclusive_code_input.clear()
+        self.priority_list.clear()
+        self.priority_list.addItem("3800")
+        self.priority_list.addItem("3600")
+        self.priority_list.addItem("3200")
+        self.log_widget.info("已載入 KKTIX 模擬站。請先另開終端機執行：python -m mock.server")
+
+    def _apply_platform_ui(self) -> None:
+        url = self.activity_url_input.text().strip()
+        if detect_platform(url) == "kktix":
+            self.account_label.setText("Email")
+            self.account_input.setPlaceholderText(_ACCOUNT_PLACEHOLDER_KKTIX)
+            self.target_session_input.setPlaceholderText(_SESSION_PLACEHOLDER_KKTIX)
+            self.exclusive_code_input.setPlaceholderText(_CODE_PLACEHOLDER_KKTIX)
+            self.windows_spin.setValue(1)
+            self.windows_spin.setEnabled(False)
+            self.windows_spin.setToolTip(_WINDOWS_TIP_KKTIX)
+            return
+        self.account_label.setText("手機")
+        self.account_input.setPlaceholderText(_ACCOUNT_PLACEHOLDER_TP)
+        self.target_session_input.setPlaceholderText(_SESSION_PLACEHOLDER_TP)
+        self.exclusive_code_input.setPlaceholderText(_CODE_PLACEHOLDER_TP)
+        self.windows_spin.setToolTip(_WINDOWS_TIP_TP)
+        self.windows_spin.setEnabled(self._ui_editable)
+
     def _add_priority(self) -> None:
         text = self.new_priority_input.text().strip()
         if text:
@@ -346,9 +412,11 @@ class MainWindow(QMainWindow):
             self.auto_agree_check.setChecked(self._config.bot_auto_agree)
             self.headless_check.setChecked(self._config.browser_headless)
             self.windows_spin.setValue(self._config.bot_parallel_windows)
+            self._apply_platform_ui()
             self.log_widget.info("設定載入完成")
         except Exception as exc:
             self.log_widget.warning(f"載入設定失敗: {exc}")
+            self._apply_platform_ui()
 
     def _save_config(self) -> None:
         try:
@@ -368,7 +436,18 @@ class MainWindow(QMainWindow):
         from ..api.event_api import fetch_event_catalog, format_catalog
         from ..utils.helpers import extract_event_id
 
-        event_id = extract_event_id(self.activity_url_input.text().strip())
+        url = self.activity_url_input.text().strip()
+        if detect_platform(url) == "kktix":
+            from ..api.kktix_api import fetch_kktix_catalog
+
+            try:
+                text = fetch_kktix_catalog(url)
+                self.log_widget.info(text)
+                QMessageBox.information(self, "KKTIX 活動資料", text[:2000])
+            except Exception as exc:
+                QMessageBox.warning(self, "錯誤", f"讀取活動資料失敗: {exc}")
+            return
+        event_id = extract_event_id(url)
         if not event_id:
             QMessageBox.warning(self, "錯誤", "請先填入有效的活動網址")
             return
@@ -497,7 +576,9 @@ class MainWindow(QMainWindow):
         self.fallback_first_check.setEnabled(editable)
         self.refresh_interval_spin.setEnabled(editable)
         self.auto_agree_check.setEnabled(editable)
+        self._ui_editable = editable
         self.windows_spin.setEnabled(editable)
+        self._apply_platform_ui()
 
     @pyqtSlot(object)
     def _on_status(self, state: BotState) -> None:
