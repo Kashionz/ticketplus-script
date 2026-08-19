@@ -1,4 +1,4 @@
-"""本機 TicketPlus 模擬站。"""
+"""本機 TicketPlus / KKTIX 模擬站。"""
 
 from __future__ import annotations
 
@@ -99,13 +99,14 @@ def start_mock_server(
 
 
 def main(argv: Optional[list] = None) -> int:
-    parser = argparse.ArgumentParser(description="TicketPlus 本機模擬站")
+    parser = argparse.ArgumentParser(description="TicketPlus / KKTIX 本機模擬站")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args(argv)
     server, _thread = start_mock_server(args.host, args.port)
     print(f"模擬站已啟動: {mock_activity_url(args.host, args.port)}")
     print(f"KKTIX: {mock_kktix_url(args.host, args.port)}")
+    print(f"KKTIX 例: {mock_kktix_url(args.host, args.port)}?scenario=presale")
     print("場景可在頁面上方切換，或加 ?scenario=presale&saleAfter=2")
     print("可用場景: happy / presale / priority-soldout / stock-later / low-stock / need-login / need-serial / queue / fail-once / overlay")
     print("KKTIX 場景: happy / presale / priority-unavailable / queue / need-login / charity-only")
