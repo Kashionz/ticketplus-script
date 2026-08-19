@@ -246,6 +246,76 @@ def is_mock_url(url: str) -> bool:
     return host in MOCK_HOSTS or host.endswith(".localhost")
 
 
+KKTIX_CHARITY_MARKERS = ("愛心", "身障", "身心障礙", "陪同")
+
+
+def detect_platform(url: str) -> str:
+    host = (urlparse(url or "").hostname or "").lower()
+    path = (urlparse(url or "").path or "").lower()
+    if is_mock_url(url):
+        if "/events/" in path:
+            return "kktix"
+        return "ticketplus"
+    if "ticketplus.com.tw" in host:
+        return "ticketplus"
+    if host == "kktix.com" or host.endswith(".kktix.cc"):
+        return "kktix"
+    return ""
+
+
+def extract_kktix_slug(url: str) -> Optional[str]:
+    parts = [p for p in urlparse(url or "").path.split("/") if p]
+    if "events" not in [p.lower() for p in parts]:
+        return None
+    idx = [p.lower() for p in parts].index("events")
+    if idx + 1 >= len(parts):
+        return None
+    slug = parts[idx + 1]
+    if slug.lower() in {"new", "registrations"}:
+        return None
+    return slug
+
+
+def is_kktix_url(url: str) -> bool:
+    return detect_platform(url) == "kktix"
+
+
+def is_kktix_registration_url(url: str) -> bool:
+    segs = url_path_segments(url)
+    return "registrations" in segs and segs[-1:] == ["new"]
+
+
+def is_kktix_login_url(url: str) -> bool:
+    segs = url_path_segments(url)
+    return segs[:2] == ["users", "sign_in"] or segs[:2] == ["users", "sign_up"]
+
+
+def is_kktix_held_url(url: str) -> bool:
+    segs = url_path_segments(url)
+    if "registrations" not in segs:
+        return False
+    idx = segs.index("registrations")
+    return idx + 1 < len(segs) and segs[idx + 1] != "new"
+
+
+def is_kktix_payment_url(url: str) -> bool:
+    if not url:
+        return False
+    segs = url_path_segments(url)
+    if segs and segs[-1] in {"pay", "payments", "payment"}:
+        return True
+    if "payments" in segs or "pay" in segs:
+        return True
+    host = (urlparse(url).hostname or "").lower()
+    hints = ("adyen", "checkoutshopper", "3dsecure", "acs.")
+    return any(h in host for h in hints)
+
+
+def is_charity_ticket_name(name: str) -> bool:
+    blob = name or ""
+    return any(mark in blob for mark in KKTIX_CHARITY_MARKERS)
+
+
 class Timer:
     def __init__(self) -> None:
         self.start_time: Optional[float] = None

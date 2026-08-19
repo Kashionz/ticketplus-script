@@ -5,12 +5,20 @@ from src.utils.helpers import (
     area_keyword_matches,
     clamp_parallel_windows,
     classify_area_sale_text,
+    detect_platform,
     extract_event_id,
+    extract_kktix_slug,
     parse_remaining_count,
     resolve_buy_quantity,
     extract_session_id,
     is_activity_url,
+    is_charity_ticket_name,
     is_confirm_url,
+    is_kktix_held_url,
+    is_kktix_login_url,
+    is_kktix_payment_url,
+    is_kktix_registration_url,
+    is_kktix_url,
     is_login_url,
     is_mock_url,
     is_order_url,
@@ -178,3 +186,46 @@ def test_ticket_config_rejects_too_many_tickets():
         quantity=5,
     )
     assert any("4" in e for e in cfg.validate())
+
+
+def test_detect_platform_ticketplus_and_kktix():
+    assert detect_platform("https://ticketplus.com.tw/activity/abc") == "ticketplus"
+    assert detect_platform("https://kktix.com/events/sbgr01/registrations/new") == "kktix"
+    assert detect_platform("https://binliveco.kktix.cc/events/sbgr01") == "kktix"
+    assert detect_platform("http://127.0.0.1:8765/activity/a" + "1" * 31) == "ticketplus"
+    assert detect_platform("http://127.0.0.1:8765/events/mock-kktix/registrations/new") == "kktix"
+    assert detect_platform("https://example.com") == ""
+
+
+def test_extract_kktix_slug():
+    assert extract_kktix_slug("https://kktix.com/events/sbgr01/registrations/new") == "sbgr01"
+    assert extract_kktix_slug("https://binliveco.kktix.cc/events/sbgr01") == "sbgr01"
+    assert extract_kktix_slug("http://127.0.0.1:8765/events/mock-kktix/registrations/new") == "mock-kktix"
+    assert extract_kktix_slug("https://ticketplus.com.tw/activity/abc") is None
+
+
+def test_kktix_url_stages():
+    reg = "https://kktix.com/events/sbgr01/registrations/new"
+    held = "https://kktix.com/events/sbgr01/registrations/abc123"
+    login = "https://kktix.com/users/sign_in"
+    pay = "https://kktix.com/events/sbgr01/registrations/abc123/pay"
+    adyen = "https://checkoutshopper-live.adyen.com/checkoutshopper/foo"
+    assert is_kktix_url(reg)
+    assert is_kktix_registration_url(reg)
+    assert not is_kktix_registration_url(held)
+    assert is_kktix_held_url(held)
+    assert not is_kktix_held_url(reg)
+    assert is_kktix_login_url(login)
+    assert is_kktix_payment_url(pay)
+    assert is_kktix_payment_url(adyen)
+    assert is_kktix_payment_url("https://acs.example.com/3dsecure")
+    assert not is_kktix_payment_url(reg)
+    assert not is_kktix_payment_url(held)
+
+
+def test_is_charity_ticket_name():
+    assert is_charity_ticket_name("愛心票")
+    assert is_charity_ticket_name("身障陪同票")
+    assert is_charity_ticket_name("身心障礙席 TWD$1900")
+    assert not is_charity_ticket_name("全票 TWD$3800")
+    assert not is_charity_ticket_name("B2層電腦配位")
