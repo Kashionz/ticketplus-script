@@ -16,7 +16,7 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 Locator = Tuple[str, str]
 
 
@@ -30,13 +30,61 @@ class BasePage:
 
     @property
     def current_url(self) -> str:
-        return self.driver.current_url
+        try:
+            return self.driver.current_url
+        except Exception as exc:
+            if "alert" in str(exc).lower():
+                return ""
+            return ""
+
+    def read_js_alert(self) -> Optional[str]:
+        """只讀 JS alert，不按確定／取消。重新選票確認回傳 rechoose。"""
+        from ..utils.helpers import is_rechoose_alert_text
+
+        try:
+            alert = self.driver.switch_to.alert
+        except Exception:
+            return None
+        try:
+            text = alert.text or ""
+        except Exception:
+            return "other"
+        if is_rechoose_alert_text(text):
+            return "rechoose"
+        return "other"
+
+    def dismiss_js_alert(self) -> Optional[str]:
+        """關掉 JS alert。重新選票確認一律按取消，避免丟掉已配座位。"""
+        from ..utils.helpers import is_rechoose_alert_text
+
+        try:
+            alert = self.driver.switch_to.alert
+        except Exception:
+            return None
+        try:
+            text = alert.text or ""
+        except Exception:
+            text = ""
+        try:
+            if is_rechoose_alert_text(text):
+                alert.dismiss()
+                logger.info("已取消「重新選票」確認，保留目前座位")
+                return "rechoose"
+            alert.dismiss()
+            return text or "other"
+        except Exception:
+            return None
 
     def navigate_to(self, url: str) -> bool:
         try:
             self.driver.get(url)
             return True
         except Exception as exc:
+            if "alert" in str(exc).lower():
+                kind = self.dismiss_js_alert()
+                if kind == "rechoose":
+                    logger.warning("導頁會取消訂單，已按取消並停在原頁")
+                    return False
             logger.debug("導航失敗: %s", exc)
             return False
 
@@ -44,6 +92,9 @@ class BasePage:
         try:
             self.driver.refresh()
         except Exception as exc:
+            if "alert" in str(exc).lower():
+                self.dismiss_js_alert()
+                return
             logger.debug("重新整理失敗: %s", exc)
 
     def wait_seconds(self, seconds: float) -> None:
@@ -92,7 +143,14 @@ class BasePage:
             return False
 
     def execute_js(self, script: str, *args: Any) -> Any:
-        return self.driver.execute_script(script, *args)
+        from ..utils.helpers import is_unexpected_alert_error
+
+        try:
+            return self.driver.execute_script(script, *args)
+        except Exception as exc:
+            if is_unexpected_alert_error(exc):
+                return None
+            raise
 
     def page_text(self) -> str:
         try:
@@ -122,6 +180,31 @@ class BasePage:
                 """
             )
         )
+
+    def is_cloudflare_challenge(self) -> bool:
+        """Cloudflare 人機驗證頁。出現時不可重整，否則挑戰會重來。"""
+        from ..utils.helpers import is_cloudflare_challenge_text
+
+        result = self.execute_js(
+            """
+            const title = document.title || '';
+            const body = (document.body && document.body.innerText) || '';
+            const iframe = document.querySelector(
+                'iframe[src*="challenges.cloudflare.com"], iframe[src*="cdn-cgi/challenge"]'
+            );
+            return {
+                title: title,
+                body: body.slice(0, 2000),
+                iframe: Boolean(iframe),
+            };
+            """
+        )
+        if isinstance(result, dict):
+            if result.get("iframe"):
+                return True
+            blob = f"{result.get('title') or ''} {result.get('body') or ''}"
+            return is_cloudflare_challenge_text(blob)
+        return False
 
     def has_loading_overlay(self) -> bool:
         return bool(

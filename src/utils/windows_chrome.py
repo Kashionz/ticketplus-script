@@ -86,6 +86,16 @@ def find_open_debugger(port: int = DEFAULT_PORT) -> Optional[str]:
     return None
 
 
+def resolve_debugger_address(configured: str = "", headless: bool = False) -> str:
+    """設定有填就用設定；否則若 9222 已有 open-chrome.bat，就接上、不要再開視窗。"""
+    configured = (configured or "").strip()
+    if configured:
+        return configured
+    if headless:
+        return ""
+    return find_open_debugger() or ""
+
+
 def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 

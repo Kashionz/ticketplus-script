@@ -13,7 +13,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from .base_page import BasePage
 from ..utils.helpers import is_login_url, normalize_mobile
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 
 LOGIN_ERROR_TEXTS = (
     "帳號或密碼錯誤",

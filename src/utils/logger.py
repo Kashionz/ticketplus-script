@@ -35,7 +35,7 @@ COLOR_LOG_COLORS = {
     "CRITICAL": "red,bg_white",
 }
 
-LOGGER_NAME = "ticketplus"
+LOGGER_NAME = "ticket-helper"
 _gui_handlers: List[Callable[[str, str], None]] = []
 
 

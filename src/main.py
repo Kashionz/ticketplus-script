@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TicketPlus 購票助手進入點。"""
+"""購票助手進入點。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ sys.path.insert(0, str(project_root))
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="TicketPlus 購票助手",
+        description="購票助手",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 範例:
@@ -72,7 +72,7 @@ def run_open_chrome(args: argparse.Namespace) -> int:
     print("接下來請用：")
     print(f"  python -m src.main --cli --attach {address}")
     print("或把 config.yaml 的 browser.debugger_address 設成這個位址。")
-    print("請先在這個視窗登入 TicketPlus，再開始搶票。")
+    print("請先在這個視窗登入 TicketPlus 或 KKTIX，再開始搶票。")
     return 0
 
 

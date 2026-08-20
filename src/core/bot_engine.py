@@ -19,13 +19,15 @@ from ..utils.helpers import (
     is_activity_url,
     is_confirm_url,
     is_login_url,
+    is_connection_refused,
     is_mock_url,
     is_order_url,
     is_payment_url,
+    navigation_refused_hint,
 )
 from .browser import BrowserManager
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 
 StatusCallback = Callable[["BotState"], None]
 LogCallback = Callable[[str, str], None]
@@ -363,15 +365,22 @@ class BotEngine:
     def _open_login_wait_page(self) -> None:
         assert self._browser and self._browser.driver
         url = self.config.activity_url
-        if self._is_kktix():
-            target = url if is_mock_url(url) else "https://kktix.com/"
-            self._browser.driver.get(target)
-            return
-        if is_mock_url(url):
-            assert self._activity
-            self._activity.open(url)
-            return
-        self._browser.open_home()
+        try:
+            if self._is_kktix():
+                target = url if is_mock_url(url) else "https://kktix.com/"
+                self._browser.driver.get(target)
+                return
+            if is_mock_url(url):
+                assert self._activity
+                self._activity.open(url)
+                return
+            self._browser.open_home()
+        except Exception as exc:
+            if is_connection_refused(exc):
+                target = url if is_mock_url(url) else ("https://kktix.com/" if self._is_kktix() else url)
+                self._log(navigation_refused_hint(target), "ERROR")
+                return
+            raise
 
     def _prepare_parallel_windows(self) -> None:
         if self._is_kktix():
@@ -886,6 +895,16 @@ class BotEngine:
 
     def _handle_human_gate(self) -> bool:
         assert self._activity
+        cloudflare = self._activity.is_cloudflare_challenge() is True
+        if cloudflare:
+            self._update_state(step=BotStep.WAIT_HUMAN, message="請在瀏覽器完成 Cloudflare 人機驗證")
+            self._log_once(
+                "cf-challenge",
+                "出現 Cloudflare「正在驗證您是否是人類」。請在這個 Chrome 視窗完成，完成前不會重整。",
+            )
+            while not self._should_stop() and self._activity.is_cloudflare_challenge():
+                self._sleep(0.5)
+            return True
         if not self._activity.has_recaptcha():
             return False
         if not self.wait_for_human:

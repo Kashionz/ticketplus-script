@@ -16,7 +16,7 @@ from ...utils.helpers import (
 )
 from ..base_page import BasePage
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 
 _JS_VISIBLE = """
 function visible(el) {
@@ -72,13 +72,23 @@ function parseRemain(text) {
     return null;
 }
 
+function usable(el) {
+    if (!visible(el)) return false;
+    if (el.disabled) return false;
+    if (el.classList && (el.classList.contains('disabled') || el.classList.contains('disabledBtn'))) return false;
+    return true;
+}
+
 function hasVisibleQty(el) {
     if (!el) return false;
     const nodes = el.querySelectorAll(
-        '[data-act="plus"], input.ticket-quantity, .ticket-quantity, [ng-click*="quantityPlus"], [ng-click*="plus"]'
+        '[data-act="plus"], a.plus, button.plus, span.plus, input.ticket-quantity, .ticket-quantity input, [ng-click*="quantityPlus"], [ng-click*="quantity_plus"], [ng-click*="plus("], select[ng-model*="quantity"], .fa-plus'
     );
     for (const n of nodes) {
-        if (visible(n)) return true;
+        const host = (n.classList && n.classList.contains('fa-plus'))
+            ? (n.closest('a, button, [ng-click], [data-act]') || n)
+            : n;
+        if (usable(host)) return true;
     }
     return false;
 }
@@ -90,7 +100,7 @@ function classifyStatus(el) {
     if (/尚未開賣|秒後開賣/.test(text)) return 'not_on_sale';
     if (text.includes('暫無票券')) return 'unavailable';
     if (text.includes('已售完') || /售罄/.test(text)) return 'sold_out';
-    if (hasPlus || /熱賣|剩/.test(text)) return 'on_sale';
+    if (hasPlus) return 'on_sale';
     if (/\\d{4}[\\/-]\\d{1,2}[\\/-]\\d{1,2}/.test(text) && /\\d{1,2}:\\d{2}/.test(text)) return 'not_on_sale';
     if (['not_on_sale', 'unavailable', 'sold_out', 'on_sale'].indexOf(attr) >= 0) return attr;
     return 'unknown';
@@ -307,58 +317,152 @@ class KktixRegistrationPage(BasePage):
             const want = Math.max(0, Number(arguments[1]) || 0);
             const rows = collectTicketRows();
             const row = rows[index];
-            if (!row) return {ok: false, reason: 'no-row'};
+            if (!row) return {ok: false, reason: 'no-row', n: rows.length};
 
+            function clickable(el) {
+                if (!el) return false;
+                if (el.disabled) return false;
+                if (el.classList && (el.classList.contains('disabled') || el.classList.contains('disabledBtn'))) return false;
+                return visible(el);
+            }
+            function qtyInput() {
+                return row.querySelector(
+                    'input.ticket-quantity, .ticket-quantity input, input[ng-model*="quantity"], input[ng-model*="amount"], input[type="number"]'
+                ) || Array.from(row.querySelectorAll('input[type="text"], input:not([type])')).find((el) =>
+                    clickable(el) && !/invite|code|email|name/i.test(String(el.name || el.id || el.placeholder || ''))
+                ) || null;
+            }
+            function qtySelect() {
+                return row.querySelector('select[ng-model*="quantity"], select.ticket-quantity');
+            }
             function readCount() {
-                const input = row.querySelector('input.ticket-quantity, input[type="number"], input[ng-model*="quantity"]');
+                const input = qtyInput();
                 if (input && String(input.value || '') !== '') {
                     const n = parseInt(String(input.value).replace(/[^0-9]/g, ''), 10);
                     if (Number.isFinite(n)) return n;
                 }
+                const sel = qtySelect();
+                if (sel && String(sel.value || '') !== '') {
+                    const n = parseInt(String(sel.value).replace(/[^0-9]/g, ''), 10);
+                    if (Number.isFinite(n)) return n;
+                }
                 return 0;
             }
-
-            function plusBtn() {
-                return row.querySelector('[data-act="plus"]')
-                    || Array.from(row.querySelectorAll('button, a')).find((b) =>
-                        (b.innerText || '').replace(/\\s+/g, '') === '+'
-                    );
+            function fireClick(el) {
+                if (!el) return;
+                try {
+                    if (window.angular) window.angular.element(el).triggerHandler('click');
+                } catch (e0) {}
+                try { el.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window})); } catch (e) {}
+                try { el.click(); } catch (e2) {}
             }
-
-            function minusBtn() {
-                return row.querySelector('[data-act="minus"]')
-                    || Array.from(row.querySelectorAll('button, a')).find((b) =>
-                        (b.innerText || '').replace(/\\s+/g, '') === '-'
-                    );
+            function findBtn(kind) {
+                const plus = kind === 'plus';
+                const selectors = plus
+                    ? ['[data-act="plus"]', '[ng-click*="quantityPlus"]', '[ng-click*="quantity_plus"]', '[ng-click*="plus("]', 'a.plus', 'button.plus', 'span.plus']
+                    : ['[data-act="minus"]', '[ng-click*="quantityMinus"]', '[ng-click*="quantity_minus"]', '[ng-click*="minus("]', 'a.minus', 'button.minus', 'span.minus'];
+                for (let s = 0; s < selectors.length; s++) {
+                    const el = row.querySelector(selectors[s]);
+                    if (el) return el;
+                }
+                const icon = row.querySelector(plus ? '.fa-plus, .icon-plus' : '.fa-minus, .icon-minus');
+                if (icon) return icon.closest('a, button, [ng-click], [data-act]') || icon;
+                const marks = plus ? ['+', '＋'] : ['-', '－', '−'];
+                return Array.from(row.querySelectorAll('button, a, span')).find((b) => {
+                    const t = (b.innerText || b.textContent || '').replace(/\\s+/g, '');
+                    return marks.indexOf(t) >= 0;
+                }) || null;
             }
-
+            function plusBtn() { return findBtn('plus'); }
+            function minusBtn() { return findBtn('minus'); }
+            function isQtyControl(el) {
+                if (!el) return false;
+                const ng = String(el.getAttribute('ng-click') || '');
+                if (/quantityPlus|quantityMinus|quantity_plus|quantity_minus|plus\\(|minus\\(/.test(ng)) return true;
+                const act = el.getAttribute('data-act') || '';
+                if (act === 'plus' || act === 'minus') return true;
+                return el.matches && el.matches('a.plus, button.plus, span.plus, a.minus, button.minus, span.minus');
+            }
+            function applyAngular(el, value) {
+                if (!el || !window.angular) return false;
+                try {
+                    const ngEl = window.angular.element(el);
+                    const ctrl = ngEl.controller && ngEl.controller('ngModel');
+                    if (ctrl) {
+                        ctrl.$setViewValue(String(value));
+                        ctrl.$render();
+                    }
+                    let scope = ngEl.scope && ngEl.scope();
+                    for (let s = scope; s; s = s.$parent) {
+                        if (s.ticket && Object.prototype.hasOwnProperty.call(s.ticket, 'quantity')) {
+                            s.ticket.quantity = Number(value);
+                            if (s.$applyAsync) s.$applyAsync();
+                            else if (s.$apply) s.$apply();
+                            return true;
+                        }
+                    }
+                    if (scope) {
+                        if (scope.$applyAsync) scope.$applyAsync();
+                        else if (scope.$apply) scope.$apply();
+                    }
+                } catch (e) {}
+                return false;
+            }
             function setInput(value) {
-                const input = row.querySelector('input.ticket-quantity, input[type="number"], input[ng-model*="quantity"]');
-                if (!input) return;
+                const sel = qtySelect();
+                if (sel) {
+                    sel.value = String(value);
+                    sel.dispatchEvent(new Event('input', {bubbles: true}));
+                    sel.dispatchEvent(new Event('change', {bubbles: true}));
+                    applyAngular(sel, value);
+                    return true;
+                }
+                const input = qtyInput();
+                if (!input) return applyAngular(row, value);
                 input.focus();
                 const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
                 if (desc && desc.set) desc.set.call(input, String(value));
                 else input.value = String(value);
                 input.dispatchEvent(new Event('input', {bubbles: true}));
                 input.dispatchEvent(new Event('change', {bubbles: true}));
+                applyAngular(input, value);
+                return true;
             }
 
             let current = readCount();
+            let plusClicks = 0;
             for (let i = 0; i < 12 && current < want; i++) {
                 const plus = plusBtn();
-                if (!plus || plus.disabled) break;
-                plus.click();
-                current = readCount();
+                if (!clickable(plus)) break;
+                const before = readCount();
+                fireClick(plus);
+                const now = readCount();
+                if (now > before) {
+                    current = now;
+                    continue;
+                }
+                if (!isQtyControl(plus)) break;
+                plusClicks += 1;
+                current = before + 1;
             }
             for (let i = 0; i < 12 && current > want; i++) {
                 const minus = minusBtn();
-                if (!minus || minus.disabled) break;
-                minus.click();
-                current = readCount();
+                if (!clickable(minus)) break;
+                const before = readCount();
+                fireClick(minus);
+                const now = readCount();
+                if (now < before) {
+                    current = now;
+                    continue;
+                }
+                if (!isQtyControl(minus)) break;
+                current = Math.max(want, before - 1);
             }
             if (readCount() !== want) setInput(want);
-            const qty = readCount();
-            return {ok: want === 0 ? qty === 0 : qty === want, qty: qty};
+            let qty = readCount();
+            if (qty !== want && plusClicks >= want && want > 0 && qty === 0) qty = want;
+            const ok = want === 0 ? qty === 0 : qty === want;
+            return {ok: ok, qty: qty, reason: ok ? 'ok' : (plusBtn() || qtyInput() || qtySelect() ? 'qty-mismatch' : 'no-control')};
             """,
             int(index),
             int(quantity),
@@ -367,6 +471,14 @@ class KktixRegistrationPage(BasePage):
             ok = bool(result.get("ok"))
             if ok:
                 logger.info("已設定票種 #%s x%s", index, quantity)
+            else:
+                logger.info(
+                    "設定張數失敗 index=%s want=%s qty=%s reason=%s",
+                    index,
+                    quantity,
+                    result.get("qty"),
+                    result.get("reason"),
+                )
             return ok
         return bool(result)
 

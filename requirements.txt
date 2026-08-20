@@ -1,4 +1,4 @@
-# TicketPlus 購票助手
+# 購票助手（ticket-helper）
 
 selenium>=4.15.0
 requests>=2.31.0

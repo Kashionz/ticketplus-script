@@ -257,6 +257,42 @@ def test_parse_kktix_sale_at_countdown_and_datetime():
     ).timestamp()
 
 
+def test_is_rechoose_alert_text():
+    from src.utils.helpers import is_rechoose_alert_text
+
+    assert is_rechoose_alert_text("目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？")
+    assert not is_rechoose_alert_text("查詢空位中")
+
+
+def test_is_unexpected_alert_error():
+    from src.utils.helpers import is_unexpected_alert_error
+
+    err = RuntimeError(
+        "Alert Text: 目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？\n"
+        "Message: unexpected alert open: {Alert text : ...}"
+    )
+    assert is_unexpected_alert_error(err)
+    assert not is_unexpected_alert_error(RuntimeError("element not interactable"))
+
+
+def test_is_cloudflare_challenge_text():
+    from src.utils.helpers import is_cloudflare_challenge_text
+
+    assert is_cloudflare_challenge_text("正在驗證您是否是人類。這可能需要幾秒鐘的時間。")
+    assert is_cloudflare_challenge_text("此網站使用安全服務抵禦惡意機器人。")
+    assert is_cloudflare_challenge_text("Just a moment...")
+    assert not is_cloudflare_challenge_text("全票 熱賣中")
+
+
+def test_navigation_refused_hint_for_mock():
+    from src.utils.helpers import is_connection_refused, navigation_refused_hint
+
+    assert is_connection_refused(RuntimeError("unknown error: net::ERR_CONNECTION_REFUSED"))
+    hint = navigation_refused_hint("http://127.0.0.1:8765/events/mock-kktix/registrations/new")
+    assert "python -m mock.server" in hint
+    assert "8765" in hint
+
+
 def test_classify_kktix_page_alert():
     assert classify_kktix_page_alert("請先驗證電話號碼後再購票") == "verification"
     assert classify_kktix_page_alert("驗證失敗，將更新頁面，請重新購票。") == "csrf"

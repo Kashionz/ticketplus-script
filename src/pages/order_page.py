@@ -12,7 +12,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from .base_page import BasePage
 from ..utils.helpers import is_payment_url
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 
 
 class OrderPage(BasePage):

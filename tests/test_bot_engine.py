@@ -49,6 +49,84 @@ def test_wait_loop_stops_when_browser_closes(monkeypatch):
     bot.stop(close_browser=True)
 
 
+def test_open_login_wait_page_survives_mock_connection_refused():
+    bot = BotEngine(
+        config=TicketConfig(
+            activity_url="http://127.0.0.1:8765/events/mock-kktix/registrations/new",
+            quantity=1,
+        ),
+        prefer_windows_chrome=False,
+    )
+    logs = []
+    bot.add_log_callback(lambda msg, level: logs.append(msg))
+    driver = MagicMock()
+    driver.get.side_effect = RuntimeError("unknown error: net::ERR_CONNECTION_REFUSED")
+    bot._browser = MagicMock()
+    bot._browser.driver = driver
+    bot._open_login_wait_page()
+    assert any("mock.server" in msg for msg in logs)
+    driver.get.assert_called()
+
+
+def test_resolve_debugger_address_prefers_open_chrome(monkeypatch):
+    from src.utils.windows_chrome import resolve_debugger_address
+
+    monkeypatch.setattr("src.utils.windows_chrome.find_open_debugger", lambda port=9222: "127.0.0.1:9222")
+    assert resolve_debugger_address("", False) == "127.0.0.1:9222"
+    assert resolve_debugger_address("127.0.0.1:9333", False) == "127.0.0.1:9333"
+    assert resolve_debugger_address("", True) == ""
+
+
+def test_dismiss_rechoose_alert_cancels_not_accepts():
+    from src.pages.base_page import BasePage
+
+    alert = MagicMock()
+    alert.text = "目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？"
+    driver = MagicMock()
+    driver.switch_to.alert = alert
+    page = BasePage(driver)
+    assert page.dismiss_js_alert() == "rechoose"
+    alert.dismiss.assert_called_once()
+    alert.accept.assert_not_called()
+
+
+def test_read_js_alert_peeks_rechoose_without_closing():
+    from src.pages.base_page import BasePage
+
+    alert = MagicMock()
+    alert.text = "目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？"
+    driver = MagicMock()
+    driver.switch_to.alert = alert
+    page = BasePage(driver)
+    assert page.read_js_alert() == "rechoose"
+    alert.dismiss.assert_not_called()
+    alert.accept.assert_not_called()
+
+
+def test_execute_js_does_not_raise_on_unexpected_alert():
+    from src.pages.base_page import BasePage
+
+    driver = MagicMock()
+    driver.execute_script.side_effect = RuntimeError(
+        "Alert Text: 目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？\n"
+        "Message: unexpected alert open: {Alert text : 目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？}"
+    )
+    page = BasePage(driver)
+    assert page.execute_js("return 1") is None
+
+
+def test_chrome_launch_hint_for_session_not_created():
+    from src.core.browser import chrome_launch_hint
+
+    hint = chrome_launch_hint(
+        RuntimeError("session not created: Chrome instance exited"),
+        ".chrome-profile",
+    )
+    assert "Chrome 啟動後立刻結束" in hint
+    assert ".chrome-profile" in hint
+    assert "open-chrome.bat" in hint
+
+
 def test_looks_like_dead_browser():
     bot = BotEngine(config=_ticket(), prefer_windows_chrome=False)
     assert bot._looks_like_dead_browser(RuntimeError("invalid session id"))
@@ -126,6 +204,7 @@ def _ready_order_bot() -> BotEngine:
     order.fill_exclusive_code.return_value = True
     activity = MagicMock()
     activity.has_recaptcha.return_value = False
+    activity.is_cloudflare_challenge.return_value = False
     activity.is_in_queue.return_value = False
     bot._order = order
     bot._activity = activity

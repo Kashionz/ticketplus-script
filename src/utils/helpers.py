@@ -246,6 +246,61 @@ def is_mock_url(url: str) -> bool:
     return host in MOCK_HOSTS or host.endswith(".localhost")
 
 
+CLOUDFLARE_MARKERS = (
+    "正在驗證您是否是人類",
+    "此網站使用安全服務抵禦惡意機器人",
+    "just a moment",
+    "checking your browser before accessing",
+    "cf-browser-verification",
+    "challenges.cloudflare.com",
+)
+
+
+def is_cloudflare_challenge_text(text: str) -> bool:
+    blob = (text or "").lower()
+    return any(mark.lower() in blob for mark in CLOUDFLARE_MARKERS)
+
+
+RECHOOSE_ALERT_MARKERS = (
+    "重新選票",
+    "座位亦不保留",
+    "訂單將先行取消",
+)
+
+
+def is_rechoose_alert_text(text: str) -> bool:
+    blob = text or ""
+    return any(mark in blob for mark in RECHOOSE_ALERT_MARKERS)
+
+
+def is_unexpected_alert_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "unexpected alert" in text or "alert text:" in text
+
+
+def is_connection_refused(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "err_connection_refused" in text or "connection refused" in text
+
+
+def navigation_refused_hint(url: str) -> str:
+    """Chrome 連不上目標網址時給使用者看的說明。"""
+    parsed = urlparse(url or "")
+    host = parsed.hostname or ""
+    port = parsed.port
+    if is_mock_url(url):
+        addr = f"{host}:{port}" if port else host or "127.0.0.1:8765"
+        return (
+            f"連不上模擬站 {url}（{addr} 沒有服務在聽）。"
+            "請先另開終端機執行：python -m mock.server"
+            "，或把網址改成正式活動頁再按啟動瀏覽器。"
+        )
+    return (
+        f"連不上 {url}（連線被拒絕）。"
+        "請檢查網路／VPN／防火牆，或改貼正確的活動網址。"
+    )
+
+
 KKTIX_CHARITY_MARKERS = ("愛心", "身障", "身心障礙", "陪同")
 _KKTIX_COUNTDOWN_RE = re.compile(r"(\d+)\s*秒後開賣")
 _KKTIX_DT_RE = re.compile(

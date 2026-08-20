@@ -16,6 +16,7 @@ from ..utils.helpers import (
     is_kktix_payment_url,
     is_kktix_registration_url,
     is_mock_url,
+    is_unexpected_alert_error,
 )
 from .bot_engine import BotStep
 from .kktix_select import pick_kktix_ticket
@@ -51,6 +52,8 @@ class KktixFlow:
         self._reg: Optional[KktixRegistrationPage] = None
         self._login: Optional[KktixLoginPage] = None
         self._checkout: Optional[KktixCheckoutPage] = None
+        self._seats_locked = False
+        self._awaiting_rechoose = False
 
     def run(self) -> bool:
         e = self.engine
@@ -72,55 +75,114 @@ class KktixFlow:
             if not e._browser_still_open():
                 return False
             e._state.retry_count = retries
-            url = self._reg.current_url
-
-            if self._at_payment(url):
-                e._log(f"已到達付款頁: {url}")
-                return True
-
-            if is_kktix_login_url(url) or self._login.has_login_form():
-                self._handle_login()
-                retries += 1
-                continue
-
-            if self._handle_human_gate():
-                continue
-
-            if self._reg.is_queue():
-                e._update_state(step=BotStep.WAIT_QUEUE, message="查詢空位中，請勿重整")
-                e._log_once("kktix-queue", "偵測到查詢空位中，停留等待官方放行，不會重新整理")
-                e._sleep(1.0)
-                continue
-
-            alert = self._handle_page_alert(url)
-            if alert == "wait":
-                continue
-            if alert == "refreshed":
-                retries += 1
-                continue
-
-            if is_kktix_held_url(url):
-                self._advance_held(url)
-                e._sleep(0.8)
-                retries += 1
-                continue
-
-            if is_kktix_registration_url(url):
-                result = self._process_registration()
-                if result == "wait_sale":
+            try:
+                result = self._loop_once()
+            except Exception as exc:
+                if is_unexpected_alert_error(exc):
+                    self._awaiting_rechoose = True
+                    self._log_rechoose_wait()
+                    e._sleep(0.4)
                     continue
-                if result:
-                    e._sleep(0.8)
+                raise
+            if result == "done":
+                return True
+            if result == "step":
                 retries += 1
-                continue
-
-            e._log(f"未預期的頁面: {url}，回到購票頁")
-            self._reg.open(self._registration_url())
-            e._sleep()
-            retries += 1
 
         url = self._reg.current_url
         return self._at_payment(url)
+
+    def _log_rechoose_wait(self) -> None:
+        e = self.engine
+        e._update_state(step=BotStep.WAIT_HUMAN, message="請選擇是否取消訂單")
+        e._log_once(
+            "kktix-rechoose-wait",
+            "出現「重新選票」確認（點取消購票會跳出這個視窗）。"
+            "按「確定」會取消訂單並重選；按「取消」則保留座位。"
+            "程式會等你選完，不會中斷。",
+        )
+
+    def _loop_once(self) -> str:
+        assert self._reg and self._login and self._checkout
+        e = self.engine
+        peek = getattr(self._reg, "read_js_alert", None)
+        kind = peek() if callable(peek) else None
+        if kind == "rechoose":
+            self._awaiting_rechoose = True
+            self._log_rechoose_wait()
+            e._sleep(0.4)
+            return "wait"
+        closed_rechoose = self._awaiting_rechoose
+        if self._awaiting_rechoose:
+            self._awaiting_rechoose = False
+            e._log("已關閉重新選票確認")
+        url = self._reg.current_url
+        if (
+            closed_rechoose
+            and self._seats_locked
+            and is_kktix_registration_url(url)
+            and self._checkout.has_seat_confirm_ui() is not True
+        ):
+            rows = self._reg.list_rows() if hasattr(self._reg, "list_rows") else []
+            if any(getattr(r, "purchasable", False) for r in rows or []):
+                self._seats_locked = False
+                e._log("訂單已取消，回到選票")
+
+        if self._at_payment(url):
+            e._log(f"已到達付款頁: {url}")
+            return "done"
+
+        if is_kktix_login_url(url) or self._login.has_login_form():
+            self._handle_login()
+            return "step"
+
+        if self._handle_human_gate():
+            return "wait"
+
+        if self._reg.is_queue():
+            e._update_state(step=BotStep.WAIT_QUEUE, message="查詢空位中，請勿重整")
+            e._log_once("kktix-queue", "偵測到查詢空位中，停留等待官方放行，不會重新整理")
+            e._sleep(1.0)
+            return "wait"
+
+        alert = self._handle_page_alert(url)
+        if alert == "wait":
+            return "wait"
+        if alert == "refreshed":
+            return "step"
+
+        if self._confirm_seats_if_needed():
+            return "step"
+
+        if self._seats_locked:
+            self._advance_held(url)
+            e._sleep(0.8)
+            return "step"
+
+        if is_kktix_held_url(url):
+            self._advance_held(url)
+            e._sleep(0.8)
+            return "step"
+
+        if is_kktix_registration_url(url):
+            result = self._process_registration()
+            if result == "wait_sale":
+                return "wait"
+            if result:
+                e._sleep(0.8)
+            return "step"
+
+        if self._reg.is_cloudflare_challenge() is True:
+            self._handle_human_gate()
+            return "wait"
+        if self._seats_locked:
+            self._advance_held(url)
+            e._sleep(0.8)
+            return "step"
+        e._log(f"未預期的頁面: {url}，回到購票頁")
+        self._reg.open(self._registration_url())
+        e._sleep()
+        return "step"
 
     def _registration_url(self) -> str:
         return kktix_registration_url(self.engine.config.activity_url)
@@ -182,10 +244,21 @@ class KktixFlow:
     def _handle_human_gate(self) -> bool:
         assert self._reg
         e = self.engine
+        cloudflare = self._reg.is_cloudflare_challenge() is True
         recaptcha = self._reg.has_recaptcha()
         question = self._reg.has_question_captcha()
-        if not recaptcha and not question:
+        if not cloudflare and not recaptcha and not question:
             return False
+        if cloudflare:
+            e._update_state(step=BotStep.WAIT_HUMAN, message="請在瀏覽器完成 Cloudflare 人機驗證")
+            e._log_once(
+                "kktix-cf",
+                "出現 Cloudflare「正在驗證您是否是人類」。請在這個 Chrome 視窗完成驗證，"
+                "完成前程式不會重整（重整會重跑驗證）。通過後會自動繼續。",
+            )
+            while not e._should_stop() and self._reg.is_cloudflare_challenge():
+                e._sleep(0.5)
+            return True
         if not e.wait_for_human:
             e._log("出現驗證碼或活動問答，但 wait_for_human=false，稍後重試", "WARNING")
             e._sleep(1.0)
@@ -194,6 +267,23 @@ class KktixFlow:
         e._log("出現 reCAPTCHA 或活動問答，請在瀏覽器手動完成，完成後程式會繼續")
         while not e._should_stop() and (self._reg.has_recaptcha() or self._reg.has_question_captcha()):
             e._sleep(0.5)
+        return True
+
+    def _confirm_seats_if_needed(self) -> bool:
+        """劃位頁已有座位時，點確認座位 → 完成選位以提早鎖票。"""
+        assert self._checkout
+        e = self.engine
+        if self._checkout.has_seat_confirm_ui() is not True:
+            return False
+        e._update_state(step=BotStep.SUBMIT, message="確認座位並完成選位")
+        result = self._checkout.confirm_assigned_seats()
+        if result == "done":
+            self._seats_locked = True
+            e._log("已點「完成選位」，等待進入填表")
+            e._sleep(0.6)
+            return True
+        e._log_once("kktix-wait-seats", "劃位畫面已出現，等待座位配好後再點完成選位（不重整）")
+        e._sleep(0.4)
         return True
 
     def _advance_held(self, url: str) -> None:
@@ -287,8 +377,13 @@ class KktixFlow:
             e._log_once("kktix-fallback", "優先票種沒票，改買第一個可購的非愛心票種")
 
         e._update_state(step=BotStep.SELECT_AREA, message="選擇票種 / 張數")
+        picked = next((r for r in rows if r.index == pick.index), None)
+        label = f"{(picked.name if picked else '')} {picked.price_text if picked else ''}".strip()
         if not self._reg.set_quantity(pick.index, pick.quantity):
-            e._log("設定張數失敗，稍後再試")
+            e._log(
+                f"設定張數失敗，稍後再試（{label or '票種'} #{pick.index} x{pick.quantity}）。"
+                "若這一列沒有加減鈕（例如表頭或暫無票券），下一輪會重選"
+            )
             e._sleep()
             return False
 
@@ -344,6 +439,12 @@ class KktixFlow:
     def _safe_refresh(self) -> None:
         assert self._reg
         url = self._reg.current_url
+        if self._reg.is_cloudflare_challenge() is True:
+            return
+        if self._seats_locked:
+            return
+        if self._checkout and self._checkout.has_seat_confirm_ui() is True:
+            return
         if self._reg.is_queue() or is_kktix_held_url(url) or is_kktix_payment_url(url):
             return
         if not is_kktix_registration_url(url):

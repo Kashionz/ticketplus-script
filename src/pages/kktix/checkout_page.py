@@ -8,7 +8,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 
 from ..base_page import BasePage
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 
 _JS_VISIBLE = """
 function visible(el) {
@@ -29,6 +29,58 @@ class KktixCheckoutPage(BasePage):
 
     def __init__(self, driver: WebDriver, timeout: int = 8):
         super().__init__(driver, timeout)
+
+    def has_seat_confirm_ui(self) -> bool:
+        return bool(
+            self.execute_js(
+                _JS_VISIBLE
+                + "return visible(document.querySelector('.btn-group-for-seat'));"
+            )
+        )
+
+    def confirm_assigned_seats(self) -> str:
+        """電腦配位／自行選位後：確認座位 → 完成選位。不改座位、不刪除。
+
+        回傳 done / wait / missing。
+        """
+        result = self.execute_js(
+            _JS_VISIBLE
+            + """
+            function textOf(el) {
+                return ((el && el.innerText) || '').replace(/\\s+/g, '');
+            }
+            const group = document.querySelector('.btn-group-for-seat');
+            if (!visible(group)) return 'missing';
+            const badge = group.querySelector('.badge');
+            const badgeN = badge ? parseInt(String(badge.textContent || '').replace(/\\D/g, ''), 10) : 0;
+            const seatCount = group.querySelectorAll('.ticket-seat, .ticket-list .ticket').length;
+            if (!(seatCount > 0 || badgeN > 0)) return 'wait';
+
+            function findDone() {
+                return Array.from(group.querySelectorAll('a, button')).find((el) => {
+                    if (!visible(el)) return false;
+                    const text = textOf(el);
+                    if (text.includes('刪除')) return false;
+                    return text.includes('完成選位') || (el.getAttribute('ng-click') || '').includes('done()');
+                });
+            }
+            let done = findDone();
+            if (!done) {
+                const toggle = Array.from(group.querySelectorAll('button, a')).find((el) => {
+                    if (!visible(el)) return false;
+                    return textOf(el).includes('確認座位');
+                });
+                if (toggle) toggle.click();
+                done = findDone();
+            }
+            if (!done) return 'wait';
+            done.click();
+            return 'done';
+            """
+        )
+        if result == "done":
+            logger.info("已點「完成選位」")
+        return result if result in {"done", "wait", "missing"} else "missing"
 
     def dismiss_seat_notice(self) -> None:
         self.execute_js(
