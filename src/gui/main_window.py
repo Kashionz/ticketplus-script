@@ -78,7 +78,7 @@ class MainWindow(QMainWindow):
         self._worker: Optional[BotWorker] = None
         self._ui_editable = True
         self._saved_parallel_windows = 1
-        self.setWindowTitle("TicketPlus 購票助手")
+        self.setWindowTitle("購票助手")
         self.setMinimumSize(1100, 720)
         self.resize(1200, 800)
         self._init_ui()

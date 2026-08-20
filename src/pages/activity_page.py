@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from .base_page import BasePage
 from ..utils.helpers import any_keyword_in, extract_event_id, is_mock_url, keyword_matches
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 
 
 class ActivityPage(BasePage):

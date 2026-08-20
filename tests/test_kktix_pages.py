@@ -165,6 +165,106 @@ def test_set_quantity_on_official_plus_minus_markup(tmp_path):
         server.server_close()
 
 
+def test_header_remaining_column_is_not_purchasable(tmp_path):
+    """官方表頭含「剩餘」，不能當成可購列，否則 fallback 會對表頭設張數失敗。"""
+    server, _ = start_mock_server(port=18791)
+    browser = None
+    try:
+        browser = _start_browser(tmp_path, "qty-header")
+        try:
+            driver = browser.start()
+        except Exception as exc:
+            pytest.skip(f"無法啟動 Chrome: {exc}")
+        page = KktixRegistrationPage(driver)
+        page.open(mock_kktix_url(port=18791) + "?scenario=happy")
+        time.sleep(0.2)
+        driver.execute_script(
+            """
+            document.getElementById('app').innerHTML = `
+              <div id="registrationsNewApp">
+                <div class="display-table-row">
+                  <div>票種</div><div>價格</div><div>剩餘</div><div>數量</div>
+                </div>
+                <div class="display-table-row">
+                  <div>全票</div><div>TWD$3980</div><div>暫無票券</div>
+                </div>
+                <div class="display-table-row">
+                  <div>全票</div><div>TWD$1280</div><div>剩餘 2</div>
+                  <div class="qty">
+                    <a href="javascript:void(0)" class="minus" style="display:inline-block;width:24px;height:24px">-</a>
+                    <input ng-model="ticket.quantity" value="0" readonly>
+                    <a href="javascript:void(0)" ng-click="quantityPlus(ticket)" class="btn" style="display:inline-block;width:24px;height:24px">
+                      <i class="fa fa-plus"></i>
+                    </a>
+                  </div>
+                </div>
+              </div>`;
+            const input = document.querySelector('input');
+            document.querySelector('[ng-click*="quantityPlus"]').addEventListener('click', () => {
+              input.value = String(Number(input.value || 0) + 1);
+            });
+            """
+        )
+        rows = page.list_rows()
+        by_price = {r.price_text: r for r in rows if r.price_text}
+        header = next(r for r in rows if r.name.startswith("票種"))
+        assert header.purchasable is False
+        assert header.status != "on_sale"
+        assert by_price["3980"].status == "unavailable"
+        assert by_price["3980"].purchasable is False
+        assert by_price["1280"].status == "on_sale"
+        assert by_price["1280"].purchasable is True
+        assert page.set_quantity(by_price["1280"].index, 2)
+        assert driver.execute_script("return document.querySelector('input').value") == "2"
+    finally:
+        if browser:
+            browser.stop()
+        server.shutdown()
+        server.server_close()
+
+
+def test_set_quantity_clicks_ng_click_not_wrapper_plus(tmp_path):
+    """官方列可能包一層 class=plus；要點到 ng-click，不能只點外層 div。"""
+    server, _ = start_mock_server(port=18792)
+    browser = None
+    try:
+        browser = _start_browser(tmp_path, "qty-wrap")
+        try:
+            driver = browser.start()
+        except Exception as exc:
+            pytest.skip(f"無法啟動 Chrome: {exc}")
+        page = KktixRegistrationPage(driver)
+        page.open(mock_kktix_url(port=18792) + "?scenario=happy")
+        time.sleep(0.2)
+        driver.execute_script(
+            """
+            document.getElementById('app').innerHTML = `
+              <div id="registrationsNewApp">
+                <div class="display-table-row">
+                  <div>全票</div>
+                  <div>TWD$2980</div>
+                  <div class="plus">
+                    <a href="javascript:void(0)" ng-click="quantityPlus(ticket)" style="display:inline-block;width:24px;height:24px">
+                      <i class="fa fa-plus"></i>
+                    </a>
+                  </div>
+                </div>
+              </div>`;
+            window.__plus = 0;
+            document.querySelector('[ng-click*="quantityPlus"]').addEventListener('click', () => {
+              window.__plus += 1;
+            });
+            """
+        )
+        assert page.set_quantity(0, 1)
+        assert driver.execute_script("return window.__plus") >= 1
+    finally:
+        if browser:
+            browser.stop()
+        server.shutdown()
+        server.server_close()
+
+
 def test_confirm_assigned_seats_clicks_done(tmp_path):
     server, _ = start_mock_server(port=18788)
     browser = None

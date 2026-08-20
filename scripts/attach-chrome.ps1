@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 $chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-$profile = "C:\Users\User\Desktop\Project\ticketplus-script\.chrome-profile"
+$profile = Join-Path (Split-Path $PSScriptRoot -Parent) ".chrome-profile"
 $url = "https://ticketplus.com.tw/order/e5baf60463fccb6391ae4dcb2e314978/0e5b6ce0e4a3c1b0f4571189c11b726e"
 New-Item -ItemType Directory -Force -Path $profile | Out-Null
 $listening = Get-NetTCPConnection -LocalPort 9222 -State Listen -ErrorAction SilentlyContinue

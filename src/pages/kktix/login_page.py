@@ -11,7 +11,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from ...utils.helpers import is_kktix_login_url, is_mock_url
 from ..base_page import BasePage
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 
 _JS_VISIBLE = """
 function visible(el) {

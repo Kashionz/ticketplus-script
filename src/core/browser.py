@@ -15,7 +15,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 
 from ..utils.windows_chrome import is_wsl, resolve_debugger_address
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 
 HOME_URL = "https://ticketplus.com.tw/"
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add KKTIX computer-assignment booking to the existing TicketPlus assistant so a KKTIX URL uses the same GUI, waits for sale-time F5, picks non-charity ticket types by price/name, and stops at the payment page.
+**Goal:** Add KKTIX computer-assignment booking to the existing 購票助手 (ticket-helper) so a KKTIX URL uses the same GUI, waits for sale-time F5, picks non-charity ticket types by price/name, and stops at the payment page.
 
 **Architecture:** `BotEngine._execute()` dispatches on `detect_platform(url)`. TicketPlus keeps the current loop. KKTIX runs `KktixFlow` against new page objects. Ticket matching is a pure function so refresh-vs-fallback and charity exclusion can be unit-tested without Chrome.
 

@@ -273,6 +273,11 @@ def is_rechoose_alert_text(text: str) -> bool:
     return any(mark in blob for mark in RECHOOSE_ALERT_MARKERS)
 
 
+def is_unexpected_alert_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "unexpected alert" in text or "alert text:" in text
+
+
 def is_connection_refused(exc: BaseException) -> bool:
     text = str(exc).lower()
     return "err_connection_refused" in text or "connection refused" in text

@@ -27,7 +27,7 @@ from ..utils.helpers import (
 )
 from .browser import BrowserManager
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 
 StatusCallback = Callable[["BotState"], None]
 LogCallback = Callable[[str, str], None]

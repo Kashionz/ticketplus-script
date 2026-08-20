@@ -16,7 +16,7 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-logger = logging.getLogger("ticketplus")
+logger = logging.getLogger("ticket-helper")
 Locator = Tuple[str, str]
 
 
@@ -34,12 +34,24 @@ class BasePage:
             return self.driver.current_url
         except Exception as exc:
             if "alert" in str(exc).lower():
-                self.dismiss_js_alert()
-                try:
-                    return self.driver.current_url
-                except Exception:
-                    return ""
+                return ""
             return ""
+
+    def read_js_alert(self) -> Optional[str]:
+        """只讀 JS alert，不按確定／取消。重新選票確認回傳 rechoose。"""
+        from ..utils.helpers import is_rechoose_alert_text
+
+        try:
+            alert = self.driver.switch_to.alert
+        except Exception:
+            return None
+        try:
+            text = alert.text or ""
+        except Exception:
+            return "other"
+        if is_rechoose_alert_text(text):
+            return "rechoose"
+        return "other"
 
     def dismiss_js_alert(self) -> Optional[str]:
         """關掉 JS alert。重新選票確認一律按取消，避免丟掉已配座位。"""
@@ -131,7 +143,14 @@ class BasePage:
             return False
 
     def execute_js(self, script: str, *args: Any) -> Any:
-        return self.driver.execute_script(script, *args)
+        from ..utils.helpers import is_unexpected_alert_error
+
+        try:
+            return self.driver.execute_script(script, *args)
+        except Exception as exc:
+            if is_unexpected_alert_error(exc):
+                return None
+            raise
 
     def page_text(self) -> str:
         try:

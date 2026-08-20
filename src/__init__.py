@@ -1,1 +1,1 @@
-"""TicketPlus 購票助手。"""
+"""購票助手（ticket-helper）。"""

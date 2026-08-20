@@ -264,6 +264,17 @@ def test_is_rechoose_alert_text():
     assert not is_rechoose_alert_text("查詢空位中")
 
 
+def test_is_unexpected_alert_error():
+    from src.utils.helpers import is_unexpected_alert_error
+
+    err = RuntimeError(
+        "Alert Text: 目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？\n"
+        "Message: unexpected alert open: {Alert text : ...}"
+    )
+    assert is_unexpected_alert_error(err)
+    assert not is_unexpected_alert_error(RuntimeError("element not interactable"))
+
+
 def test_is_cloudflare_challenge_text():
     from src.utils.helpers import is_cloudflare_challenge_text
 

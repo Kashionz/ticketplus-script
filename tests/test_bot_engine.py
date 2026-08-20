@@ -90,6 +90,31 @@ def test_dismiss_rechoose_alert_cancels_not_accepts():
     alert.accept.assert_not_called()
 
 
+def test_read_js_alert_peeks_rechoose_without_closing():
+    from src.pages.base_page import BasePage
+
+    alert = MagicMock()
+    alert.text = "目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？"
+    driver = MagicMock()
+    driver.switch_to.alert = alert
+    page = BasePage(driver)
+    assert page.read_js_alert() == "rechoose"
+    alert.dismiss.assert_not_called()
+    alert.accept.assert_not_called()
+
+
+def test_execute_js_does_not_raise_on_unexpected_alert():
+    from src.pages.base_page import BasePage
+
+    driver = MagicMock()
+    driver.execute_script.side_effect = RuntimeError(
+        "Alert Text: 目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？\n"
+        "Message: unexpected alert open: {Alert text : 目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？}"
+    )
+    page = BasePage(driver)
+    assert page.execute_js("return 1") is None
+
+
 def test_chrome_launch_hint_for_session_not_created():
     from src.core.browser import chrome_launch_hint
 
