@@ -125,10 +125,28 @@
   function renderHeld() {
     return `
       <div class="held-box" id="registrationsNewApp">
-        <h1>確認報名資料</h1>
-        <p>劃位完成，請確認資料後按下一步。</p>
-        <div class="register-new-next-button-area">
-          <button type="button" data-act="next">下一步</button>
+        <div class="btn-group-for-seat">
+          <button type="button" class="btn btn-primary" data-act="confirm-seat">
+            確認座位 <span class="badge">2</span>
+          </button>
+          <div class="dropdown-block" id="seat-dropdown">
+            <div class="ticket-bar">
+              <div class="total">
+                <a href="javascript:void(0)" class="btn btn-primary" data-act="finish-seat">完成選位</a>
+              </div>
+              <ul class="ticket-list">
+                <li class="ticket"><span class="ticket-seat">全區 13排 33號</span></li>
+                <li class="ticket"><span class="ticket-seat">全區 13排 34號</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div id="held-form" hidden>
+          <h1>確認報名資料</h1>
+          <p>劃位完成，請確認資料後按下一步。</p>
+          <div class="register-new-next-button-area">
+            <button type="button" data-act="next">下一步</button>
+          </div>
         </div>
       </div>`;
   }
@@ -180,6 +198,18 @@
       }
       if (act === "auto-seat") {
         showQueueThenHold();
+        return;
+      }
+      if (act === "confirm-seat") {
+        const drop = document.getElementById("seat-dropdown");
+        if (drop) drop.classList.toggle("show");
+        return;
+      }
+      if (act === "finish-seat") {
+        const group = document.querySelector(".btn-group-for-seat");
+        const form = document.getElementById("held-form");
+        if (group) group.hidden = true;
+        if (form) form.hidden = false;
         return;
       }
       if (act === "next") {

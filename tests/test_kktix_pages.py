@@ -103,6 +103,9 @@ def test_checkout_and_sale_helpers_on_mock(tmp_path):
 
         driver.get(origin + "/events/mock-kktix/registrations/held1")
         time.sleep(0.4)
+        assert checkout.has_seat_confirm_ui()
+        assert checkout.confirm_assigned_seats() == "done"
+        time.sleep(0.2)
         checkout.dismiss_seat_notice()
         assert checkout.click_advance()
         deadline = time.time() + 8
@@ -110,6 +113,47 @@ def test_checkout_and_sale_helpers_on_mock(tmp_path):
             time.sleep(0.2)
         assert "/pay" in driver.current_url
         assert checkout.has_card_field()
+    finally:
+        if browser:
+            browser.stop()
+        server.shutdown()
+        server.server_close()
+
+
+def test_confirm_assigned_seats_clicks_done(tmp_path):
+    server, _ = start_mock_server(port=18788)
+    browser = None
+    try:
+        browser = _start_browser(tmp_path, "seat-confirm")
+        try:
+            driver = browser.start()
+        except Exception as exc:
+            pytest.skip(f"無法啟動 Chrome: {exc}")
+        from src.pages.kktix.checkout_page import KktixCheckoutPage
+
+        driver.get("http://127.0.0.1:18788/events/mock-kktix/registrations/new?scenario=happy")
+        time.sleep(0.2)
+        driver.execute_script(
+            """
+            document.getElementById('app').innerHTML = `
+              <div class="btn-group-for-seat">
+                <button type="button" class="btn btn-primary">確認座位 <span class="badge">2</span></button>
+                <div class="dropdown-block">
+                  <a href="javascript:void(0)" class="btn btn-primary" ng-click="done()">完成選位</a>
+                  <ul class="ticket-list">
+                    <li class="ticket"><span class="ticket-seat">全區 13排 33號</span></li>
+                    <li class="ticket"><span class="ticket-seat">全區 13排 34號</span></li>
+                  </ul>
+                </div>
+              </div>`;
+            window.__seatDone = 0;
+            document.querySelector('[ng-click="done()"]').addEventListener('click', () => { window.__seatDone = 1; });
+            """
+        )
+        checkout = KktixCheckoutPage(driver)
+        assert checkout.has_seat_confirm_ui()
+        assert checkout.confirm_assigned_seats() == "done"
+        assert driver.execute_script("return window.__seatDone") == 1
     finally:
         if browser:
             browser.stop()

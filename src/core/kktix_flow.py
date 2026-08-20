@@ -99,6 +99,10 @@ class KktixFlow:
                 retries += 1
                 continue
 
+            if self._confirm_seats_if_needed():
+                retries += 1
+                continue
+
             if is_kktix_held_url(url):
                 self._advance_held(url)
                 e._sleep(0.8)
@@ -208,6 +212,22 @@ class KktixFlow:
         e._log("出現 reCAPTCHA 或活動問答，請在瀏覽器手動完成，完成後程式會繼續")
         while not e._should_stop() and (self._reg.has_recaptcha() or self._reg.has_question_captcha()):
             e._sleep(0.5)
+        return True
+
+    def _confirm_seats_if_needed(self) -> bool:
+        """劃位頁已有座位時，點確認座位 → 完成選位以提早鎖票。"""
+        assert self._checkout
+        e = self.engine
+        if self._checkout.has_seat_confirm_ui() is not True:
+            return False
+        e._update_state(step=BotStep.SUBMIT, message="確認座位並完成選位")
+        result = self._checkout.confirm_assigned_seats()
+        if result == "done":
+            e._log("已點「完成選位」，等待進入填表")
+            e._sleep(0.6)
+            return True
+        e._log_once("kktix-wait-seats", "劃位畫面已出現，等待座位配好後再點完成選位（不重整）")
+        e._sleep(0.4)
         return True
 
     def _advance_held(self, url: str) -> None:
@@ -359,6 +379,8 @@ class KktixFlow:
         assert self._reg
         url = self._reg.current_url
         if self._reg.is_cloudflare_challenge() is True:
+            return
+        if self._checkout and self._checkout.has_seat_confirm_ui() is True:
             return
         if self._reg.is_queue() or is_kktix_held_url(url) or is_kktix_payment_url(url):
             return
