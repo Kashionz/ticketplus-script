@@ -339,7 +339,10 @@ class KktixFlow:
 
         e._update_state(step=BotStep.SELECT_AREA, message="選擇票種 / 張數")
         if not self._reg.set_quantity(pick.index, pick.quantity):
-            e._log("設定張數失敗，稍後再試")
+            e._log(
+                f"設定張數失敗，稍後再試（票種 #{pick.index} x{pick.quantity}）。"
+                "若畫面加減鈕不是 +/− 文字、或還在載入，下一輪會再試"
+            )
             e._sleep()
             return False
 

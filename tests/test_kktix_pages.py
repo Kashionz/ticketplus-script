@@ -120,6 +120,51 @@ def test_checkout_and_sale_helpers_on_mock(tmp_path):
         server.server_close()
 
 
+def test_set_quantity_on_official_plus_minus_markup(tmp_path):
+    server, _ = start_mock_server(port=18789)
+    browser = None
+    try:
+        browser = _start_browser(tmp_path, "qty-official")
+        try:
+            driver = browser.start()
+        except Exception as exc:
+            pytest.skip(f"無法啟動 Chrome: {exc}")
+        page = KktixRegistrationPage(driver)
+        page.open(mock_kktix_url(port=18789) + "?scenario=happy")
+        time.sleep(0.2)
+        driver.execute_script(
+            """
+            document.getElementById('app').innerHTML = `
+              <div id="registrationsNewApp">
+                <div class="display-table-row">
+                  <div>全票</div>
+                  <div>TWD$3800</div>
+                  <div class="ticket-quantity">
+                    <a href="javascript:void(0)" class="minus">-</a>
+                    <input ng-model="ticket.quantity" value="0">
+                    <a href="javascript:void(0)" class="plus">+</a>
+                  </div>
+                </div>
+              </div>`;
+            const row = document.querySelector('.display-table-row');
+            const input = row.querySelector('input');
+            row.querySelector('.plus').addEventListener('click', () => {
+              input.value = String(Number(input.value || 0) + 1);
+            });
+            row.querySelector('.minus').addEventListener('click', () => {
+              input.value = String(Math.max(0, Number(input.value || 0) - 1));
+            });
+            """
+        )
+        assert page.set_quantity(0, 2)
+        assert driver.execute_script("return document.querySelector('input').value") == "2"
+    finally:
+        if browser:
+            browser.stop()
+        server.shutdown()
+        server.server_close()
+
+
 def test_confirm_assigned_seats_clicks_done(tmp_path):
     server, _ = start_mock_server(port=18788)
     browser = None

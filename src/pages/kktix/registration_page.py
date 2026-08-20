@@ -75,7 +75,7 @@ function parseRemain(text) {
 function hasVisibleQty(el) {
     if (!el) return false;
     const nodes = el.querySelectorAll(
-        '[data-act="plus"], input.ticket-quantity, .ticket-quantity, [ng-click*="quantityPlus"], [ng-click*="plus"]'
+        '[data-act="plus"], .plus, a.plus, button.plus, input.ticket-quantity, .ticket-quantity input, [ng-click*="quantityPlus"], [ng-click*="plus"]'
     );
     for (const n of nodes) {
         if (visible(n)) return true;
@@ -307,58 +307,98 @@ class KktixRegistrationPage(BasePage):
             const want = Math.max(0, Number(arguments[1]) || 0);
             const rows = collectTicketRows();
             const row = rows[index];
-            if (!row) return {ok: false, reason: 'no-row'};
+            if (!row) return {ok: false, reason: 'no-row', n: rows.length};
 
+            function clickable(el) {
+                if (!el) return false;
+                if (el.disabled) return false;
+                if (el.classList && (el.classList.contains('disabled') || el.classList.contains('disabledBtn'))) return false;
+                return visible(el);
+            }
+            function qtyInput() {
+                return row.querySelector(
+                    'input.ticket-quantity, .ticket-quantity input, input[ng-model*="quantity"], input[ng-model*="amount"], input[type="number"]'
+                ) || Array.from(row.querySelectorAll('input[type="text"], input:not([type])')).find((el) =>
+                    clickable(el) && !/invite|code|email|name/i.test(String(el.name || el.id || el.placeholder || ''))
+                ) || null;
+            }
             function readCount() {
-                const input = row.querySelector('input.ticket-quantity, input[type="number"], input[ng-model*="quantity"]');
+                const input = qtyInput();
                 if (input && String(input.value || '') !== '') {
                     const n = parseInt(String(input.value).replace(/[^0-9]/g, ''), 10);
                     if (Number.isFinite(n)) return n;
                 }
                 return 0;
             }
-
+            function fireClick(el) {
+                if (!el) return;
+                try { el.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window})); } catch (e) {}
+                try { el.click(); } catch (e2) {}
+            }
             function plusBtn() {
-                return row.querySelector('[data-act="plus"]')
-                    || Array.from(row.querySelectorAll('button, a')).find((b) =>
-                        (b.innerText || '').replace(/\\s+/g, '') === '+'
-                    );
+                return row.querySelector('[data-act="plus"], a.plus, button.plus, .plus, [ng-click*="quantityPlus"], [ng-click*="quantity_plus"]')
+                    || Array.from(row.querySelectorAll('button, a, span')).find((b) => {
+                        const t = (b.innerText || b.textContent || '').replace(/\\s+/g, '');
+                        return t === '+' || t === '＋';
+                    });
             }
-
             function minusBtn() {
-                return row.querySelector('[data-act="minus"]')
-                    || Array.from(row.querySelectorAll('button, a')).find((b) =>
-                        (b.innerText || '').replace(/\\s+/g, '') === '-'
-                    );
+                return row.querySelector('[data-act="minus"], a.minus, button.minus, .minus, [ng-click*="quantityMinus"], [ng-click*="quantity_minus"]')
+                    || Array.from(row.querySelectorAll('button, a, span')).find((b) => {
+                        const t = (b.innerText || b.textContent || '').replace(/\\s+/g, '');
+                        return t === '-' || t === '－' || t === '−';
+                    });
             }
-
-            function setInput(value) {
-                const input = row.querySelector('input.ticket-quantity, input[type="number"], input[ng-model*="quantity"]');
+            function applyAngular(input, value) {
                 if (!input) return;
+                try {
+                    if (!window.angular) return;
+                    const ngEl = window.angular.element(input);
+                    const ctrl = ngEl.controller && ngEl.controller('ngModel');
+                    if (ctrl) {
+                        ctrl.$setViewValue(String(value));
+                        ctrl.$render();
+                    }
+                    const scope = ngEl.scope && ngEl.scope();
+                    if (scope) {
+                        if (scope.ticket && Object.prototype.hasOwnProperty.call(scope.ticket, 'quantity')) {
+                            scope.ticket.quantity = Number(value);
+                        }
+                        if (scope.$applyAsync) scope.$applyAsync();
+                        else if (scope.$apply) scope.$apply();
+                    }
+                } catch (e) {}
+            }
+            function setInput(value) {
+                const input = qtyInput();
+                if (!input) return false;
                 input.focus();
                 const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
                 if (desc && desc.set) desc.set.call(input, String(value));
                 else input.value = String(value);
                 input.dispatchEvent(new Event('input', {bubbles: true}));
                 input.dispatchEvent(new Event('change', {bubbles: true}));
+                applyAngular(input, value);
+                return true;
             }
 
             let current = readCount();
             for (let i = 0; i < 12 && current < want; i++) {
                 const plus = plusBtn();
-                if (!plus || plus.disabled) break;
-                plus.click();
+                if (!clickable(plus)) break;
+                fireClick(plus);
                 current = readCount();
             }
             for (let i = 0; i < 12 && current > want; i++) {
                 const minus = minusBtn();
-                if (!minus || minus.disabled) break;
-                minus.click();
+                if (!clickable(minus)) break;
+                fireClick(minus);
                 current = readCount();
             }
             if (readCount() !== want) setInput(want);
             const qty = readCount();
-            return {ok: want === 0 ? qty === 0 : qty === want, qty: qty};
+            const ok = want === 0 ? qty === 0 : qty === want;
+            return {ok: ok, qty: qty, reason: ok ? 'ok' : (plusBtn() || qtyInput() ? 'qty-mismatch' : 'no-control')};
             """,
             int(index),
             int(quantity),
@@ -367,6 +407,14 @@ class KktixRegistrationPage(BasePage):
             ok = bool(result.get("ok"))
             if ok:
                 logger.info("已設定票種 #%s x%s", index, quantity)
+            else:
+                logger.info(
+                    "設定張數失敗 index=%s want=%s qty=%s reason=%s",
+                    index,
+                    quantity,
+                    result.get("qty"),
+                    result.get("reason"),
+                )
             return ok
         return bool(result)
 
