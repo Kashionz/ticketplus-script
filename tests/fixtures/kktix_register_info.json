@@ -1,0 +1,16 @@
+{
+  "inventory": null,
+  "current_user": null,
+  "register_status": "COMING_SOON",
+  "tickets": [
+    {"id": 1054995, "upper_bound": 0, "lower_bound": 0, "step": 1, "in_stock": true, "has_pending": false},
+    {"id": 1054996, "upper_bound": 0, "lower_bound": 0, "step": 1, "in_stock": true, "has_pending": false},
+    {"id": 1054991, "upper_bound": 0, "lower_bound": 0, "step": 1, "in_stock": false, "has_pending": false}
+  ],
+  "sections": [
+    {"id": 95621, "stock_level": "NEARLY_SOLD_OUT"},
+    {"id": 95615, "stock_level": "IN_STOCK"}
+  ],
+  "order": {"price_currency": "TWD"},
+  "now": "2026-08-20T03:44:26+08:00"
+}

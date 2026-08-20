@@ -12,6 +12,8 @@ def test_example_config_loads(tmp_path: Path, monkeypatch):
     assert cfg.bot_refresh_interval >= 200
     assert ticket.country_code == "+886"
     assert ticket.require_exact_quantity is False
+    example = Path("config/config.example.yaml").read_text(encoding="utf-8")
+    assert "kktix.com/events/sbgr01" in example
 
 
 def test_local_config_points_to_test_event():

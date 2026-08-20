@@ -246,6 +246,190 @@ def is_mock_url(url: str) -> bool:
     return host in MOCK_HOSTS or host.endswith(".localhost")
 
 
+KKTIX_CHARITY_MARKERS = ("愛心", "身障", "身心障礙", "陪同")
+_KKTIX_COUNTDOWN_RE = re.compile(r"(\d+)\s*秒後開賣")
+_KKTIX_DT_RE = re.compile(
+    r"(20\d{2})[/-](\d{1,2})[/-](\d{1,2})"
+    r"[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?"
+    r"(?:\s*\(\+0?8:?00\))?"
+)
+_KKTIX_CLOCK_RE = re.compile(
+    r"(?<![\d/:])(\d{1,2}):([0-5]\d)(?::([0-5]\d))?(?:\s*\(\+0?8:?00\))?(?![\d:])"
+)
+
+
+def parse_kktix_countdown_remaining(text: str) -> Optional[float]:
+    """從「N秒後開賣」取出剩餘秒數。沒有倒數則回 None。"""
+    matches = [int(m.group(1)) for m in _KKTIX_COUNTDOWN_RE.finditer(text or "")]
+    if not matches:
+        return None
+    return float(min(matches))
+
+
+def parse_kktix_sale_at(text: str, now: Optional[float] = None) -> Optional[float]:
+    """把購票頁看得到的開賣時間轉成 unix seconds（Asia/Taipei）。
+
+    優先「N秒後開賣」，再解析日期＋時間，最後才是只有時刻（例如 12:00＝今天，已過則明天）。
+    多個日期時取「即將到來」的那一個，避免誤用票種截止日或頁面裡更早的舊日期。
+    """
+    now = time.time() if now is None else float(now)
+    remaining = parse_kktix_countdown_remaining(text)
+    if remaining is not None:
+        return now + remaining
+    tz = taipei_tz()
+    found: list[float] = []
+    for match in _KKTIX_DT_RE.finditer(text or ""):
+        try:
+            dt = datetime(
+                int(match.group(1)),
+                int(match.group(2)),
+                int(match.group(3)),
+                int(match.group(4)),
+                int(match.group(5)),
+                int(match.group(6) or 0),
+                tzinfo=tz,
+            )
+        except ValueError:
+            continue
+        found.append(dt.timestamp())
+    if found:
+        # 票種列通常是「開賣 ~ 截止」；取文中第一個日期當開賣，不要拿截止日或更早的舊日期
+        return found[0]
+    stripped = _KKTIX_DT_RE.sub(" ", text or "")
+    clocks: list[tuple[int, int, int]] = []
+    for match in _KKTIX_CLOCK_RE.finditer(stripped):
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        second = int(match.group(3) or 0)
+        if hour > 23:
+            continue
+        clocks.append((hour, minute, second))
+    if not clocks:
+        return None
+    hour, minute, second = clocks[0]
+    base = datetime.fromtimestamp(now, tz=tz)
+    candidate = base.replace(hour=hour, minute=minute, second=second, microsecond=0)
+    if candidate.timestamp() < now - 2:
+        candidate = candidate + timedelta(days=1)
+    return candidate.timestamp()
+
+
+
+def detect_platform(url: str) -> str:
+    host = (urlparse(url or "").hostname or "").lower()
+    path = (urlparse(url or "").path or "").lower()
+    if is_mock_url(url):
+        if "/events/" in path:
+            return "kktix"
+        return "ticketplus"
+    if "ticketplus.com.tw" in host:
+        return "ticketplus"
+    if host == "kktix.com" or host.endswith(".kktix.com") or host.endswith(".kktix.cc"):
+        return "kktix"
+    return ""
+
+
+def extract_kktix_slug(url: str) -> Optional[str]:
+    parts = [p for p in urlparse(url or "").path.split("/") if p]
+    if "events" not in [p.lower() for p in parts]:
+        return None
+    idx = [p.lower() for p in parts].index("events")
+    if idx + 1 >= len(parts):
+        return None
+    slug = parts[idx + 1]
+    if slug.lower() in {"new", "registrations"}:
+        return None
+    return slug
+
+
+def is_kktix_url(url: str) -> bool:
+    return detect_platform(url) == "kktix"
+
+
+def is_kktix_registration_url(url: str) -> bool:
+    segs = url_path_segments(url)
+    return "registrations" in segs and segs[-1:] == ["new"]
+
+
+def is_kktix_login_url(url: str) -> bool:
+    segs = url_path_segments(url)
+    return segs[:2] == ["users", "sign_in"] or segs[:2] == ["users", "sign_up"]
+
+
+def is_kktix_held_url(url: str) -> bool:
+    segs = url_path_segments(url)
+    if "registrations" not in segs:
+        return False
+    idx = segs.index("registrations")
+    return idx + 1 < len(segs) and segs[idx + 1] != "new"
+
+
+def is_kktix_payment_url(url: str) -> bool:
+    if not url:
+        return False
+    segs = url_path_segments(url)
+    if segs and segs[-1] in {"pay", "payments", "payment"}:
+        return True
+    if "payments" in segs or "pay" in segs:
+        return True
+    host = (urlparse(url).hostname or "").lower()
+    hints = ("adyen", "checkoutshopper", "3dsecure", "acs.")
+    return any(h in host for h in hints)
+
+
+KKTIX_VERIFY_MARKERS = (
+    "驗證過手機號碼",
+    "驗證電話號碼",
+    "請先驗證",
+    "尚未驗證",
+    "請先完成手機",
+    "請先完成電子郵件",
+    "需先完成手機號碼及電子郵件",
+    "電子郵件地址驗證",
+    "手機號碼驗證",
+)
+KKTIX_BUSY_MARKERS = (
+    "流量管制",
+    "系統忙碌",
+    "系統發生錯誤，請稍後再試",
+    "忙碌中，請稍候",
+    "忙碌中，請稍後嘗試",
+    "請檢查您的網路連線",
+)
+KKTIX_FAIL_MARKERS = (
+    "購票失敗",
+    "目前沒有可以購買的票券",
+    "目前沒有任何可以購買的票券",
+    "別人搶先",
+    "無法購買",
+    "訂單已過期",
+)
+KKTIX_CSRF_MARKERS = (
+    "驗證失敗，將更新頁面",
+    "csrf_token",
+)
+
+
+def classify_kktix_page_alert(text: str) -> str:
+    """購票頁警示：verification / csrf / failure / busy / 空字串。"""
+    blob = text or ""
+    if any(mark in blob for mark in KKTIX_VERIFY_MARKERS):
+        return "verification"
+    lower = blob.lower()
+    if "csrf" in lower or any(mark in blob for mark in KKTIX_CSRF_MARKERS):
+        return "csrf"
+    if any(mark in blob for mark in KKTIX_FAIL_MARKERS):
+        return "failure"
+    if any(mark in blob for mark in KKTIX_BUSY_MARKERS):
+        return "busy"
+    return ""
+
+
+def is_charity_ticket_name(name: str) -> bool:
+    blob = name or ""
+    return any(mark in blob for mark in KKTIX_CHARITY_MARKERS)
+
+
 class Timer:
     def __init__(self) -> None:
         self.start_time: Optional[float] = None

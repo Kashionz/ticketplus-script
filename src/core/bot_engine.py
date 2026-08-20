@@ -15,6 +15,7 @@ from ..pages.login_page import LoginPage
 from ..pages.order_page import OrderPage
 from ..utils.helpers import (
     clamp_parallel_windows,
+    detect_platform,
     is_activity_url,
     is_confirm_url,
     is_login_url,
@@ -356,7 +357,26 @@ class BotEngine:
                 pass
         self._extra_engines = kept
 
+    def _is_kktix(self) -> bool:
+        return detect_platform(self.config.activity_url) == "kktix"
+
+    def _open_login_wait_page(self) -> None:
+        assert self._browser and self._browser.driver
+        url = self.config.activity_url
+        if self._is_kktix():
+            target = url if is_mock_url(url) else "https://kktix.com/"
+            self._browser.driver.get(target)
+            return
+        if is_mock_url(url):
+            assert self._activity
+            self._activity.open(url)
+            return
+        self._browser.open_home()
+
     def _prepare_parallel_windows(self) -> None:
+        if self._is_kktix():
+            self._log("KKTIX 不支援同時多視窗，只使用目前這個視窗")
+            return
         count = clamp_parallel_windows(self.parallel_windows)
         if count <= 1 or self.window_index != 1:
             return
@@ -478,11 +498,13 @@ class BotEngine:
                 step=BotStep.WAIT_LOGIN,
                 message="請在瀏覽器登入，完成後點「開始搶票」",
             )
-            if is_mock_url(self.config.activity_url):
-                self._activity.open(self.config.activity_url)
-            else:
-                self._browser.open_home()
-            if self._login and self._login.is_logged_in():
+            self._open_login_wait_page()
+            if self._is_kktix():
+                if self.config.account and self.config.password:
+                    self._log("尚未登入，啟動後將自動登入")
+                else:
+                    self._log("請先在瀏覽器登入 KKTIX，或在設定填入 Email 與密碼以啟用自動登入")
+            elif self._login and self._login.is_logged_in():
                 self._log("已登入，略過自動登入")
             elif self.config.account and self.config.password:
                 self._log("尚未登入，啟動後將自動登入")
@@ -499,7 +521,8 @@ class BotEngine:
             if not self._browser_still_open():
                 return
 
-            self._ensure_login(force_navigate_back=False)
+            if not self._is_kktix():
+                self._ensure_login(force_navigate_back=False)
             self._update_state(status=BotStatus.RUNNING)
             self._finish_after_execute(self._execute())
         except Exception as exc:
@@ -515,7 +538,8 @@ class BotEngine:
                 return
             self._log("開始執行購票流程")
             self._update_state(status=BotStatus.RUNNING, step=BotStep.NAVIGATE, message="開始搶票")
-            self._ensure_login(force_navigate_back=False)
+            if not self._is_kktix():
+                self._ensure_login(force_navigate_back=False)
             self._finish_after_execute(self._execute())
         except Exception as exc:
             if self._looks_like_dead_browser(exc):
@@ -547,6 +571,11 @@ class BotEngine:
             return False
 
     def _execute(self) -> bool:
+        if detect_platform(self.config.activity_url) == "kktix":
+            from .kktix_flow import KktixFlow
+
+            return KktixFlow(self).run()
+
         assert self._activity and self._order
         event_id = self.config.get_event_id()
         if not event_id:
