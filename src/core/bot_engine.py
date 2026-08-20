@@ -19,9 +19,11 @@ from ..utils.helpers import (
     is_activity_url,
     is_confirm_url,
     is_login_url,
+    is_connection_refused,
     is_mock_url,
     is_order_url,
     is_payment_url,
+    navigation_refused_hint,
 )
 from .browser import BrowserManager
 
@@ -363,15 +365,22 @@ class BotEngine:
     def _open_login_wait_page(self) -> None:
         assert self._browser and self._browser.driver
         url = self.config.activity_url
-        if self._is_kktix():
-            target = url if is_mock_url(url) else "https://kktix.com/"
-            self._browser.driver.get(target)
-            return
-        if is_mock_url(url):
-            assert self._activity
-            self._activity.open(url)
-            return
-        self._browser.open_home()
+        try:
+            if self._is_kktix():
+                target = url if is_mock_url(url) else "https://kktix.com/"
+                self._browser.driver.get(target)
+                return
+            if is_mock_url(url):
+                assert self._activity
+                self._activity.open(url)
+                return
+            self._browser.open_home()
+        except Exception as exc:
+            if is_connection_refused(exc):
+                target = url if is_mock_url(url) else ("https://kktix.com/" if self._is_kktix() else url)
+                self._log(navigation_refused_hint(target), "ERROR")
+                return
+            raise
 
     def _prepare_parallel_windows(self) -> None:
         if self._is_kktix():

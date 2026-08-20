@@ -257,6 +257,15 @@ def test_parse_kktix_sale_at_countdown_and_datetime():
     ).timestamp()
 
 
+def test_navigation_refused_hint_for_mock():
+    from src.utils.helpers import is_connection_refused, navigation_refused_hint
+
+    assert is_connection_refused(RuntimeError("unknown error: net::ERR_CONNECTION_REFUSED"))
+    hint = navigation_refused_hint("http://127.0.0.1:8765/events/mock-kktix/registrations/new")
+    assert "python -m mock.server" in hint
+    assert "8765" in hint
+
+
 def test_classify_kktix_page_alert():
     assert classify_kktix_page_alert("請先驗證電話號碼後再購票") == "verification"
     assert classify_kktix_page_alert("驗證失敗，將更新頁面，請重新購票。") == "csrf"

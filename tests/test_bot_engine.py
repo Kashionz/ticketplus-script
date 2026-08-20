@@ -49,6 +49,25 @@ def test_wait_loop_stops_when_browser_closes(monkeypatch):
     bot.stop(close_browser=True)
 
 
+def test_open_login_wait_page_survives_mock_connection_refused():
+    bot = BotEngine(
+        config=TicketConfig(
+            activity_url="http://127.0.0.1:8765/events/mock-kktix/registrations/new",
+            quantity=1,
+        ),
+        prefer_windows_chrome=False,
+    )
+    logs = []
+    bot.add_log_callback(lambda msg, level: logs.append(msg))
+    driver = MagicMock()
+    driver.get.side_effect = RuntimeError("unknown error: net::ERR_CONNECTION_REFUSED")
+    bot._browser = MagicMock()
+    bot._browser.driver = driver
+    bot._open_login_wait_page()
+    assert any("mock.server" in msg for msg in logs)
+    driver.get.assert_called()
+
+
 def test_looks_like_dead_browser():
     bot = BotEngine(config=_ticket(), prefer_windows_chrome=False)
     assert bot._looks_like_dead_browser(RuntimeError("invalid session id"))
