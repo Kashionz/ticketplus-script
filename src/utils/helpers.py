@@ -246,6 +246,21 @@ def is_mock_url(url: str) -> bool:
     return host in MOCK_HOSTS or host.endswith(".localhost")
 
 
+CLOUDFLARE_MARKERS = (
+    "正在驗證您是否是人類",
+    "此網站使用安全服務抵禦惡意機器人",
+    "just a moment",
+    "checking your browser before accessing",
+    "cf-browser-verification",
+    "challenges.cloudflare.com",
+)
+
+
+def is_cloudflare_challenge_text(text: str) -> bool:
+    blob = (text or "").lower()
+    return any(mark.lower() in blob for mark in CLOUDFLARE_MARKERS)
+
+
 def is_connection_refused(exc: BaseException) -> bool:
     text = str(exc).lower()
     return "err_connection_refused" in text or "connection refused" in text

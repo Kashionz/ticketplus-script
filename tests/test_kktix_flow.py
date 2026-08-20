@@ -106,6 +106,9 @@ def test_wait_sale_does_not_consume_max_retries(monkeypatch):
         def has_question_captcha(self):
             return False
 
+        def is_cloudflare_challenge(self):
+            return False
+
         def classify_alert(self):
             return ""
 
@@ -155,6 +158,9 @@ def test_failed_quantity_and_assign_sleep(monkeypatch):
             return False
 
         def has_question_captcha(self):
+            return False
+
+        def is_cloudflare_challenge(self):
             return False
 
         def classify_alert(self):
@@ -211,6 +217,9 @@ def test_held_disabled_next_logs_prefill(monkeypatch):
         def has_question_captcha(self):
             return False
 
+        def is_cloudflare_challenge(self):
+            return False
+
         def classify_alert(self):
             return ""
 
@@ -260,6 +269,9 @@ def _alert_engine(monkeypatch, url: str, kind: str, max_retries: int = 2):
             return False
 
         def has_question_captcha(self):
+            return False
+
+        def is_cloudflare_challenge(self):
             return False
 
         def classify_alert(self):
@@ -328,6 +340,65 @@ def test_csrf_refreshes_when_not_held(monkeypatch):
     engine._should_stop.return_value = False
     assert KktixFlow(engine).run() is False
     assert refreshed["n"] >= 1
+
+
+def test_cloudflare_challenge_waits_without_refresh(monkeypatch):
+    url = "https://kktix.com/events/sbgr01/registrations/new"
+    engine, refreshed = _alert_engine(monkeypatch, url, "")
+    loops = {"n": 0}
+
+    class FakeReg:
+        def __init__(self, driver, timeout=8):
+            self.current_url = url
+
+        def detect_sale_state(self):
+            return "unknown"
+
+        def is_queue(self):
+            return False
+
+        def has_recaptcha(self):
+            return False
+
+        def has_question_captcha(self):
+            return False
+
+        def is_cloudflare_challenge(self):
+            return loops["n"] < 4
+
+        def classify_alert(self):
+            return ""
+
+        def list_rows(self):
+            return [KktixTicketRow(0, "全票", "3800", "not_on_sale", purchasable=False)]
+
+        def sale_at_epoch(self):
+            return time.time() + 1000
+
+        def sale_countdown_remaining(self):
+            return 1000.0
+
+        def open(self, url):
+            raise AssertionError("must not navigate away during Cloudflare")
+
+        def refresh(self):
+            refreshed["n"] += 1
+
+    fake_login = MagicMock()
+    fake_login.has_login_form.return_value = False
+    fake_checkout = MagicMock()
+    fake_checkout.has_card_field.return_value = False
+    monkeypatch.setattr("src.core.kktix_flow.KktixRegistrationPage", FakeReg)
+    monkeypatch.setattr("src.core.kktix_flow.KktixLoginPage", lambda *a, **k: fake_login)
+    monkeypatch.setattr("src.core.kktix_flow.KktixCheckoutPage", lambda *a, **k: fake_checkout)
+
+    def should_stop():
+        loops["n"] += 1
+        return loops["n"] > 6
+
+    engine._should_stop.side_effect = should_stop
+    assert KktixFlow(engine).run() is False
+    assert refreshed["n"] == 0
 
 
 def test_csrf_does_not_refresh_when_held(monkeypatch):

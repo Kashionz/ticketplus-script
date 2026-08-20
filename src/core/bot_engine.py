@@ -895,6 +895,16 @@ class BotEngine:
 
     def _handle_human_gate(self) -> bool:
         assert self._activity
+        cloudflare = self._activity.is_cloudflare_challenge() is True
+        if cloudflare:
+            self._update_state(step=BotStep.WAIT_HUMAN, message="請在瀏覽器完成 Cloudflare 人機驗證")
+            self._log_once(
+                "cf-challenge",
+                "出現 Cloudflare「正在驗證您是否是人類」。請在這個 Chrome 視窗完成，完成前不會重整。",
+            )
+            while not self._should_stop() and self._activity.is_cloudflare_challenge():
+                self._sleep(0.5)
+            return True
         if not self._activity.has_recaptcha():
             return False
         if not self.wait_for_human:

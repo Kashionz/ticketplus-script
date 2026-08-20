@@ -114,6 +114,9 @@ class KktixFlow:
                 retries += 1
                 continue
 
+            if self._reg.is_cloudflare_challenge() is True:
+                self._handle_human_gate()
+                continue
             e._log(f"未預期的頁面: {url}，回到購票頁")
             self._reg.open(self._registration_url())
             e._sleep()
@@ -182,10 +185,21 @@ class KktixFlow:
     def _handle_human_gate(self) -> bool:
         assert self._reg
         e = self.engine
+        cloudflare = self._reg.is_cloudflare_challenge() is True
         recaptcha = self._reg.has_recaptcha()
         question = self._reg.has_question_captcha()
-        if not recaptcha and not question:
+        if not cloudflare and not recaptcha and not question:
             return False
+        if cloudflare:
+            e._update_state(step=BotStep.WAIT_HUMAN, message="請在瀏覽器完成 Cloudflare 人機驗證")
+            e._log_once(
+                "kktix-cf",
+                "出現 Cloudflare「正在驗證您是否是人類」。請在這個 Chrome 視窗完成驗證，"
+                "完成前程式不會重整（重整會重跑驗證）。通過後會自動繼續。",
+            )
+            while not e._should_stop() and self._reg.is_cloudflare_challenge():
+                e._sleep(0.5)
+            return True
         if not e.wait_for_human:
             e._log("出現驗證碼或活動問答，但 wait_for_human=false，稍後重試", "WARNING")
             e._sleep(1.0)
@@ -344,6 +358,8 @@ class KktixFlow:
     def _safe_refresh(self) -> None:
         assert self._reg
         url = self._reg.current_url
+        if self._reg.is_cloudflare_challenge() is True:
+            return
         if self._reg.is_queue() or is_kktix_held_url(url) or is_kktix_payment_url(url):
             return
         if not is_kktix_registration_url(url):

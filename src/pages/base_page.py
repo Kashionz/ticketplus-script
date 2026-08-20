@@ -123,6 +123,31 @@ class BasePage:
             )
         )
 
+    def is_cloudflare_challenge(self) -> bool:
+        """Cloudflare 人機驗證頁。出現時不可重整，否則挑戰會重來。"""
+        from ..utils.helpers import is_cloudflare_challenge_text
+
+        result = self.execute_js(
+            """
+            const title = document.title || '';
+            const body = (document.body && document.body.innerText) || '';
+            const iframe = document.querySelector(
+                'iframe[src*="challenges.cloudflare.com"], iframe[src*="cdn-cgi/challenge"]'
+            );
+            return {
+                title: title,
+                body: body.slice(0, 2000),
+                iframe: Boolean(iframe),
+            };
+            """
+        )
+        if isinstance(result, dict):
+            if result.get("iframe"):
+                return True
+            blob = f"{result.get('title') or ''} {result.get('body') or ''}"
+            return is_cloudflare_challenge_text(blob)
+        return False
+
     def has_loading_overlay(self) -> bool:
         return bool(
             self.execute_js(

@@ -257,6 +257,15 @@ def test_parse_kktix_sale_at_countdown_and_datetime():
     ).timestamp()
 
 
+def test_is_cloudflare_challenge_text():
+    from src.utils.helpers import is_cloudflare_challenge_text
+
+    assert is_cloudflare_challenge_text("正在驗證您是否是人類。這可能需要幾秒鐘的時間。")
+    assert is_cloudflare_challenge_text("此網站使用安全服務抵禦惡意機器人。")
+    assert is_cloudflare_challenge_text("Just a moment...")
+    assert not is_cloudflare_challenge_text("全票 熱賣中")
+
+
 def test_navigation_refused_hint_for_mock():
     from src.utils.helpers import is_connection_refused, navigation_refused_hint
 

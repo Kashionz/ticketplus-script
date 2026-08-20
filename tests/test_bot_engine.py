@@ -145,6 +145,7 @@ def _ready_order_bot() -> BotEngine:
     order.fill_exclusive_code.return_value = True
     activity = MagicMock()
     activity.has_recaptcha.return_value = False
+    activity.is_cloudflare_challenge.return_value = False
     activity.is_in_queue.return_value = False
     bot._order = order
     bot._activity = activity

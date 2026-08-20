@@ -84,8 +84,9 @@ class BrowserManager:
             options.add_argument(f"--user-data-dir={str(profile)}")
         if self.chrome_binary:
             options.binary_location = self.chrome_binary
-        options.add_experimental_option("excludeSwitches", ["enable-logging"])
+        options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
         options.add_experimental_option("useAutomationExtension", False)
+        options.add_argument("--disable-blink-features=AutomationControlled")
         return options
 
     def _service(self) -> Service:
@@ -97,6 +98,13 @@ class BrowserManager:
         driver = webdriver.Chrome(service=self._service(), options=options)
         driver.set_page_load_timeout(self.page_load_timeout)
         driver.implicitly_wait(0.2)
+        try:
+            driver.execute_cdp_cmd(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"},
+            )
+        except Exception:
+            pass
         return driver
 
     def start(self) -> WebDriver:
