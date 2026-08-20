@@ -333,7 +333,7 @@ KKTIX 不走這條遠大迴圈，見[KKTIX](#kktix)。
 | 同時視窗 | **固定 1**（此活動明示多開會失敗） |
 | 自行選位 | 不支援。有「電腦配位」就按它，否則按「下一步」，不按「自行選位」 |
 
-「查看活動資料」會讀公開 `register_info` 與活動頁票種表，不開瀏覽器。貼 `kktix.com` 活動頁時可能被 Cloudflare 擋住；改貼主辦單位 `*.kktix.cc` 網址通常可以。
+「查看活動資料」會讀公開 `register_info` 與活動頁票種表，不開瀏覽器。`kktix.com` 活動頁若被 Cloudflare 擋住，仍會顯示 `register_info`；改貼主辦單位 `*.kktix.cc` 才能看到完整票種表。
 
 本機模擬：`http://127.0.0.1:8765/events/mock-kktix/registrations/new`（需另開模擬站，或 GUI「載入 KKTIX 模擬」）。場景見[本機模擬站](#本機模擬站)。
 
@@ -673,8 +673,8 @@ Atarayo：開賣 2026/09/05 12:00，優先級 3800 / 3600 / 3200，同時視窗 
 **KKTIX 填表欄空白、下一步按不了**  
 程式不代填報名人資料。到 [報名預填資料](https://kktix.com/account/prefills) 補齊，或在當頁手動填；填完後程式會繼續按下一步。
 
-**KKTIX「查看活動資料」失敗**  
-`kktix.com` 活動頁可能被 Cloudflare 擋住。改貼主辦單位 `*.kktix.cc` 網址，或直接貼 `/events/{slug}/registrations/new`。
+**KKTIX「查看活動資料」只有狀態沒有票種表**  
+`kktix.com` 活動頁可能被 Cloudflare 擋住，程式會改只顯示 `register_info`。要完整票種表請改貼主辦單位 `*.kktix.cc` 網址。
 
 **KKTIX 選到愛心票？**  
 不會。名稱含愛心／身障／身心障礙／陪同的票種一律跳過，即使優先級填了對應價格。

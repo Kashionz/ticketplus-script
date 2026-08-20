@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from html import unescape
-from typing import Any, Dict, Iterable, List, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from urllib.parse import urlparse
 
 import requests
@@ -25,14 +25,56 @@ STATUS_ZH = {
 TicketRow = Union[Tuple[str, str], Tuple[str, str, str], Sequence[str]]
 
 
+def _looks_like_cloudflare(html: str, status_code: int = 200) -> bool:
+    if status_code == 403:
+        return True
+    blob = (html or "")[:2500].lower()
+    return "just a moment" in blob and "cloudflare" in blob
+
+
 def _get(url: str, timeout: int = 15) -> requests.Response:
     response = requests.get(
         url,
         headers={"User-Agent": UA},
         timeout=timeout,
+        allow_redirects=True,
     )
     response.raise_for_status()
     return response
+
+
+def _event_page_candidates(url: str, slug: str) -> List[str]:
+    primary = _event_page_url(url, slug)
+    generic = EVENT_PAGE_URL.format(slug=slug)
+    seen: List[str] = []
+    for item in (primary, generic):
+        if item not in seen:
+            seen.append(item)
+    return seen
+
+
+def _fetch_event_html(url: str, slug: str) -> str:
+    """活動頁可能被 Cloudflare 擋；失敗回空字串，仍可用 register_info。"""
+    last_error: Optional[Exception] = None
+    for candidate in _event_page_candidates(url, slug):
+        try:
+            response = requests.get(
+                candidate,
+                headers={"User-Agent": UA},
+                timeout=15,
+                allow_redirects=True,
+            )
+            if _looks_like_cloudflare(response.text, response.status_code):
+                last_error = RuntimeError(f"Cloudflare 擋住 {candidate}")
+                continue
+            response.raise_for_status()
+            return response.text
+        except requests.RequestException as exc:
+            last_error = exc
+            continue
+    if last_error:
+        return ""
+    return ""
 
 
 def _strip_tags(html: str) -> str:
@@ -170,7 +212,10 @@ def fetch_kktix_catalog(url: str) -> str:
     if not slug:
         raise ValueError("無法從 KKTIX 網址解析活動代碼")
     info = fetch_register_info(slug)
-    html = _get(_event_page_url(url, slug)).text
+    html = _fetch_event_html(url, slug)
     title = parse_event_title(html) or slug
     tickets = parse_ticket_table(html)
-    return format_kktix_catalog(slug, title, info, tickets)
+    text = format_kktix_catalog(slug, title, info, tickets)
+    if not html:
+        text = text.rstrip() + "\n（活動頁無法讀取，可能被 Cloudflare 擋住；僅顯示 register_info。）\n"
+    return text

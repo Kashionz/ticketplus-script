@@ -253,6 +253,9 @@ _KKTIX_DT_RE = re.compile(
     r"[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?"
     r"(?:\s*\(\+0?8:?00\))?"
 )
+_KKTIX_CLOCK_RE = re.compile(
+    r"(?<![\d/:])(\d{1,2}):([0-5]\d)(?::([0-5]\d))?(?:\s*\(\+0?8:?00\))?(?![\d:])"
+)
 
 
 def parse_kktix_countdown_remaining(text: str) -> Optional[float]:
@@ -266,14 +269,15 @@ def parse_kktix_countdown_remaining(text: str) -> Optional[float]:
 def parse_kktix_sale_at(text: str, now: Optional[float] = None) -> Optional[float]:
     """把購票頁看得到的開賣時間轉成 unix seconds（Asia/Taipei）。
 
-    優先「N秒後開賣」，否則解析日期＋時間。讀不到則回 None。
+    優先「N秒後開賣」，再解析日期＋時間，最後才是只有時刻（例如 12:00＝今天，已過則明天）。
+    多個日期時取「即將到來」的那一個，避免誤用票種截止日或頁面裡更早的舊日期。
     """
     now = time.time() if now is None else float(now)
     remaining = parse_kktix_countdown_remaining(text)
     if remaining is not None:
         return now + remaining
-    earliest: Optional[float] = None
     tz = taipei_tz()
+    found: list[float] = []
     for match in _KKTIX_DT_RE.finditer(text or ""):
         try:
             dt = datetime(
@@ -287,10 +291,27 @@ def parse_kktix_sale_at(text: str, now: Optional[float] = None) -> Optional[floa
             )
         except ValueError:
             continue
-        ts = dt.timestamp()
-        if earliest is None or ts < earliest:
-            earliest = ts
-    return earliest
+        found.append(dt.timestamp())
+    if found:
+        # 票種列通常是「開賣 ~ 截止」；取文中第一個日期當開賣，不要拿截止日或更早的舊日期
+        return found[0]
+    stripped = _KKTIX_DT_RE.sub(" ", text or "")
+    clocks: list[tuple[int, int, int]] = []
+    for match in _KKTIX_CLOCK_RE.finditer(stripped):
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        second = int(match.group(3) or 0)
+        if hour > 23:
+            continue
+        clocks.append((hour, minute, second))
+    if not clocks:
+        return None
+    hour, minute, second = clocks[0]
+    base = datetime.fromtimestamp(now, tz=tz)
+    candidate = base.replace(hour=hour, minute=minute, second=second, microsecond=0)
+    if candidate.timestamp() < now - 2:
+        candidate = candidate + timedelta(days=1)
+    return candidate.timestamp()
 
 
 

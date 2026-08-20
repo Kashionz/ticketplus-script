@@ -52,6 +52,44 @@ def test_fetch_mock_url_skips_http():
     assert "模擬" in text
 
 
+def test_fetch_catalog_falls_back_when_event_page_blocked():
+    info = {"register_status": "COMING_SOON", "tickets": [{"id": 1, "in_stock": True}]}
+    calls = []
+
+    def side_effect(url, **kwargs):
+        calls.append(url)
+        if "register_info" in url:
+
+            class OK:
+                status_code = 200
+                text = "{}"
+
+                def json(self):
+                    return info
+
+                def raise_for_status(self):
+                    return None
+
+            return OK()
+
+        class Blocked:
+            status_code = 403
+            text = "Just a moment... cloudflare"
+
+            def raise_for_status(self):
+                import requests as req
+
+                raise req.HTTPError("403")
+
+        return Blocked()
+
+    with patch("src.api.kktix_api.requests.get", side_effect=side_effect):
+        text = fetch_kktix_catalog("https://kktix.com/events/sbgr01/registrations/new")
+    assert "COMING_SOON" in text or "尚未開賣" in text
+    assert "無法讀取" in text
+    assert any("register_info" in u for u in calls)
+
+
 def test_inspect_command_kktix_mock(capsys):
     from argparse import Namespace
 

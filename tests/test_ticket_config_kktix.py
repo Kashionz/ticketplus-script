@@ -35,3 +35,8 @@ def test_unknown_host_still_fails():
 def test_ticketplus_still_requires_event_id():
     cfg = TicketConfig(activity_url="https://ticketplus.com.tw/activity/not-an-id", quantity=1)
     assert cfg.validate()
+
+
+def test_kktix_config_str_uses_slug():
+    cfg = TicketConfig(activity_url="https://kktix.com/events/sbgr01/registrations/new", quantity=2)
+    assert "sbgr01" in str(cfg)

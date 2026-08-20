@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
         self._bot_engine: Optional[BotEngine] = None
         self._worker: Optional[BotWorker] = None
         self._ui_editable = True
+        self._saved_parallel_windows = 1
         self.setWindowTitle("TicketPlus 購票助手")
         self.setMinimumSize(1100, 720)
         self.resize(1200, 800)
@@ -331,13 +332,22 @@ class MainWindow(QMainWindow):
         self.priority_list.addItem("3200")
         self.log_widget.info("已載入 KKTIX 模擬站。請先另開終端機執行：python -m mock.server")
 
+    def _parallel_windows_for_config(self) -> int:
+        url = self.activity_url_input.text().strip()
+        if detect_platform(url) == "kktix":
+            return max(1, int(self._saved_parallel_windows or 1))
+        return self.windows_spin.value()
+
     def _apply_platform_ui(self) -> None:
         url = self.activity_url_input.text().strip()
+        was_locked = not self.windows_spin.isEnabled()
         if detect_platform(url) == "kktix":
             self.account_label.setText("Email")
             self.account_input.setPlaceholderText(_ACCOUNT_PLACEHOLDER_KKTIX)
             self.target_session_input.setPlaceholderText(_SESSION_PLACEHOLDER_KKTIX)
             self.exclusive_code_input.setPlaceholderText(_CODE_PLACEHOLDER_KKTIX)
+            if not was_locked:
+                self._saved_parallel_windows = max(1, self.windows_spin.value())
             self.windows_spin.setValue(1)
             self.windows_spin.setEnabled(False)
             self.windows_spin.setToolTip(_WINDOWS_TIP_KKTIX)
@@ -348,6 +358,8 @@ class MainWindow(QMainWindow):
         self.exclusive_code_input.setPlaceholderText(_CODE_PLACEHOLDER_TP)
         self.windows_spin.setToolTip(_WINDOWS_TIP_TP)
         self.windows_spin.setEnabled(self._ui_editable)
+        if was_locked and self._ui_editable:
+            self.windows_spin.setValue(max(1, int(self._saved_parallel_windows or 1)))
 
     def _add_priority(self) -> None:
         text = self.new_priority_input.text().strip()
@@ -411,7 +423,8 @@ class MainWindow(QMainWindow):
             self.refresh_interval_spin.setValue(self._config.bot_refresh_interval)
             self.auto_agree_check.setChecked(self._config.bot_auto_agree)
             self.headless_check.setChecked(self._config.browser_headless)
-            self.windows_spin.setValue(self._config.bot_parallel_windows)
+            self._saved_parallel_windows = max(1, int(self._config.bot_parallel_windows or 1))
+            self.windows_spin.setValue(self._saved_parallel_windows)
             self._apply_platform_ui()
             self.log_widget.info("設定載入完成")
         except Exception as exc:
@@ -425,7 +438,7 @@ class MainWindow(QMainWindow):
             self._config.set_ticket_config(self._ticket_config())
             self._config.set("bot.refresh_interval", self.refresh_interval_spin.value())
             self._config.set("bot.auto_agree", self.auto_agree_check.isChecked())
-            self._config.set("bot.parallel_windows", self.windows_spin.value())
+            self._config.set("bot.parallel_windows", self._parallel_windows_for_config())
             self._config.set("browser.headless", self.headless_check.isChecked())
             self._config.save()
             self.log_widget.success("設定已儲存")

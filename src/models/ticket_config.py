@@ -50,8 +50,9 @@ class TicketConfig:
         return errors
 
     def __str__(self) -> str:
+        event = self.get_kktix_slug() or self.get_event_id()
         return (
-            f"TicketConfig(event={self.get_event_id()}, "
+            f"TicketConfig(event={event}, "
             f"session={self.target_session!r}, qty={self.quantity}, "
             f"areas={self.area_priorities})"
         )

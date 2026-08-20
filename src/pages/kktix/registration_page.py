@@ -48,8 +48,6 @@ function saleHintText() {
         '[data-ticket-row], #registrationsNewApp .display-table-row, .period-time, .timezoneSuffix'
     );
     for (const n of nodes) chunks.push(n.innerText || '');
-    const body = document.body ? (document.body.innerText || '') : '';
-    chunks.push(body);
     return chunks.join('\\n').slice(0, 8000);
 }
 """

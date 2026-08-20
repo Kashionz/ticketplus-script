@@ -246,6 +246,15 @@ def test_parse_kktix_sale_at_countdown_and_datetime():
     ts = parse_kktix_sale_at("全票 2026/09/05 12:00(+0800) ~ 2026/12/19 18:59(+0800)")
     assert ts == datetime(2026, 9, 5, 12, 0, tzinfo=taipei_tz()).timestamp()
     assert parse_kktix_sale_at("全票 TWD$3800") is None
+    tz = taipei_tz()
+    morning = datetime(2026, 9, 5, 11, 0, tzinfo=tz).timestamp()
+    assert parse_kktix_sale_at("尚未開賣 12:00", now=morning) == datetime(
+        2026, 9, 5, 12, 0, tzinfo=tz
+    ).timestamp()
+    afternoon = datetime(2026, 9, 5, 13, 0, tzinfo=tz).timestamp()
+    assert parse_kktix_sale_at("開賣 12:00", now=afternoon) == datetime(
+        2026, 9, 6, 12, 0, tzinfo=tz
+    ).timestamp()
 
 
 def test_classify_kktix_page_alert():
