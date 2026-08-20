@@ -92,6 +92,13 @@ class KktixFlow:
                 e._sleep(1.0)
                 continue
 
+            alert = self._handle_page_alert(url)
+            if alert == "wait":
+                continue
+            if alert == "refreshed":
+                retries += 1
+                continue
+
             if is_kktix_held_url(url):
                 self._advance_held(url)
                 e._sleep(0.8)
@@ -208,6 +215,45 @@ class KktixFlow:
                 "kktix-prefill",
                 "下一步無法點擊。請到 https://kktix.com/account/prefills 填寫報名預填資料，或在本頁手動補齊；填完後程式會繼續按下一步",
             )
+
+    def _handle_page_alert(self, url: str) -> str:
+        """verification/busy/failure/csrf。回傳 wait（不計重試）、refreshed、或空字串繼續。"""
+        assert self._reg
+        e = self.engine
+        kind = self._reg.classify_alert()
+        held = is_kktix_held_url(url)
+        if kind == "verification":
+            e._update_state(step=BotStep.WAIT_LOGIN, message="請完成手機或 Email 驗證")
+            e._log_once(
+                "kktix-verify",
+                "購票需要已驗證的手機與電子郵件。請在瀏覽器完成驗證，完成前不會重整頁面",
+            )
+            e._sleep(1.0)
+            return "wait"
+        if kind == "busy":
+            e._update_state(step=BotStep.WAIT_QUEUE, message="流量管制／系統忙碌，稍後再試")
+            e._log_once("kktix-busy", "偵測到流量管制或系統忙碌，等待後再試，已鎖票則不重整")
+            e._sleep()
+            return "wait"
+        if kind == "failure":
+            closed = self._reg.dismiss_failure_dialog()
+            if closed:
+                e._log("購票失敗視窗已關閉")
+            if held:
+                e._log_once("kktix-fail-held", "已鎖票後出現失敗訊息，只往前不重選")
+                return ""
+            e._sleep()
+            return "wait"
+        if kind == "csrf":
+            if held or self._reg.is_queue() or self._at_payment(url):
+                e._log_once("kktix-csrf-hold", "已鎖票或排隊中，忽略官方 CSRF 重整")
+                e._sleep()
+                return "wait"
+            e._log("官方要求更新頁面（CSRF），尚未鎖票，跟隨重整")
+            self._safe_refresh()
+            e._sleep()
+            return "refreshed"
+        return ""
 
     def _process_registration(self) -> bool | str:
         assert self._reg

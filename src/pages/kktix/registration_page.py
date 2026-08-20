@@ -9,7 +9,11 @@ from typing import Any, Dict, List, Optional
 from selenium.webdriver.remote.webdriver import WebDriver
 
 from ...core.kktix_select import KktixTicketRow
-from ...utils.helpers import parse_kktix_countdown_remaining, parse_kktix_sale_at
+from ...utils.helpers import (
+    classify_kktix_page_alert,
+    parse_kktix_countdown_remaining,
+    parse_kktix_sale_at,
+)
 from ..base_page import BasePage
 
 logger = logging.getLogger("ticketplus")
@@ -242,6 +246,40 @@ class KktixRegistrationPage(BasePage):
 
     def has_question_captcha(self) -> bool:
         return bool(self.execute_js("return Boolean(document.querySelector('.custom-captcha-inner'));"))
+
+    def page_text(self) -> str:
+        text = self.execute_js("return (document.body && document.body.innerText) || '';")
+        return text if isinstance(text, str) else ""
+
+    def classify_alert(self) -> str:
+        return classify_kktix_page_alert(self.page_text())
+
+    def dismiss_failure_dialog(self) -> bool:
+        return bool(
+            self.execute_js(
+                _JS_VISIBLE
+                + """
+                const fail = /購票失敗|目前沒有可以購買的票券|目前沒有任何可以購買的票券|別人搶先|無法購買|訂單已過期/;
+                const dialogs = document.querySelectorAll(
+                    '[role="dialog"], .modal, .alert, .sweet-alert, .kk-modal, .modal-dialog'
+                );
+                for (const dialog of dialogs) {
+                    if (!visible(dialog)) continue;
+                    const blob = dialog.innerText || '';
+                    if (!fail.test(blob)) continue;
+                    const btn = Array.from(dialog.querySelectorAll('button, a.btn, .btn, .close')).find((b) => {
+                        if (!visible(b)) return false;
+                        const t = ((b.innerText || b.getAttribute('aria-label') || '')).replace(/\\s+/g, '');
+                        return !t || /確定|關閉|知道了|OK|關閉視窗|×/.test(t);
+                    });
+                    if (btn) { btn.click(); return true; }
+                    dialog.remove();
+                    return true;
+                }
+                return false;
+                """
+            )
+        )
 
     def agree_terms(self) -> bool:
         result = self.execute_js(

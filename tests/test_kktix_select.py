@@ -81,6 +81,21 @@ def test_charity_only_available_refreshes():
     assert pick.action == "refresh"
 
 
+def test_only_charity_row_on_sale_refreshes():
+    rows = [_row(0, "愛心票", "1900", "on_sale")]
+    pick = pick_kktix_ticket(rows, [], 1, True, False)
+    assert pick.action == "refresh"
+
+
+def test_charity_on_sale_while_regular_not_started_refreshes():
+    rows = [
+        _row(0, "全票", "3800", "not_on_sale", purchasable=False),
+        _row(1, "愛心票", "1900", "on_sale"),
+    ]
+    pick = pick_kktix_ticket(rows, ["3800"], 2, False, False)
+    assert pick.action == "refresh"
+
+
 def test_select_matching_price():
     pick = pick_kktix_ticket(_atarayo("on_sale"), ["3600"], 2, False, False)
     assert pick.action == "select"

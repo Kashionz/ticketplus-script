@@ -25,7 +25,7 @@ function visible(el) {
 
 
 class KktixCheckoutPage(BasePage):
-    ADVANCE_TEXTS = ("下一步", "確認訂單並繳費", "確認訂單", "知道了")
+    ADVANCE_TEXTS = ("下一步", "確認訂單並繳費", "確認訂單")
 
     def __init__(self, driver: WebDriver, timeout: int = 8):
         super().__init__(driver, timeout)
@@ -78,6 +78,7 @@ class KktixCheckoutPage(BasePage):
                 if (!enabled(b)) return false;
                 const text = textOf(b);
                 if (!text || text.includes('自行選位')) return false;
+                if (text.includes('知道了') || text.includes('我知道了')) return false;
                 return allow.some((t) => text.includes(t));
             });
             if (!btn) return false;
@@ -98,7 +99,13 @@ class KktixCheckoutPage(BasePage):
                 const inputs = Array.from(document.querySelectorAll(
                     'input[name="cardNumber"], input[autocomplete="cc-number"]'
                 ));
-                return inputs.some((el) => visible(el));
+                if (inputs.some((el) => visible(el))) return true;
+                const frames = Array.from(document.querySelectorAll('iframe[src]'));
+                return frames.some((f) => {
+                    const src = String(f.getAttribute('src') || '').toLowerCase();
+                    return src.includes('adyen') || src.includes('checkoutshopper')
+                        || src.includes('3dsecure') || src.includes('acs.');
+                });
                 """
             )
         )

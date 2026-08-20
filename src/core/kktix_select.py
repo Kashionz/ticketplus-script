@@ -46,7 +46,12 @@ def pick_kktix_ticket(
 ) -> KktixPick:
     eligible = _eligible(rows)
     started = {"on_sale", "unavailable", "sold_out"}
-    if not rows or not any(r.status in started for r in eligible):
+    if any(r.status in started for r in eligible):
+        pass
+    elif any(r.status in started for r in rows if is_charity_ticket_name(r.name)):
+        # 開賣了但只剩愛心／身障，規格視為沒有可購種 → 重整等釋票
+        return KktixPick("refresh")
+    else:
         # 表頭／unknown 列不代表已開賣，避免開賣前被當成 refresh 狂 F5
         return KktixPick("wait_sale")
 

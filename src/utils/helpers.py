@@ -303,7 +303,7 @@ def detect_platform(url: str) -> str:
         return "ticketplus"
     if "ticketplus.com.tw" in host:
         return "ticketplus"
-    if host == "kktix.com" or host.endswith(".kktix.cc"):
+    if host == "kktix.com" or host.endswith(".kktix.com") or host.endswith(".kktix.cc"):
         return "kktix"
     return ""
 
@@ -354,6 +354,54 @@ def is_kktix_payment_url(url: str) -> bool:
     host = (urlparse(url).hostname or "").lower()
     hints = ("adyen", "checkoutshopper", "3dsecure", "acs.")
     return any(h in host for h in hints)
+
+
+KKTIX_VERIFY_MARKERS = (
+    "驗證過手機號碼",
+    "驗證電話號碼",
+    "請先驗證",
+    "尚未驗證",
+    "請先完成手機",
+    "請先完成電子郵件",
+    "需先完成手機號碼及電子郵件",
+    "電子郵件地址驗證",
+    "手機號碼驗證",
+)
+KKTIX_BUSY_MARKERS = (
+    "流量管制",
+    "系統忙碌",
+    "系統發生錯誤，請稍後再試",
+    "忙碌中，請稍候",
+    "忙碌中，請稍後嘗試",
+    "請檢查您的網路連線",
+)
+KKTIX_FAIL_MARKERS = (
+    "購票失敗",
+    "目前沒有可以購買的票券",
+    "目前沒有任何可以購買的票券",
+    "別人搶先",
+    "無法購買",
+    "訂單已過期",
+)
+KKTIX_CSRF_MARKERS = (
+    "驗證失敗，將更新頁面",
+    "csrf_token",
+)
+
+
+def classify_kktix_page_alert(text: str) -> str:
+    """購票頁警示：verification / csrf / failure / busy / 空字串。"""
+    blob = text or ""
+    if any(mark in blob for mark in KKTIX_VERIFY_MARKERS):
+        return "verification"
+    lower = blob.lower()
+    if "csrf" in lower or any(mark in blob for mark in KKTIX_CSRF_MARKERS):
+        return "csrf"
+    if any(mark in blob for mark in KKTIX_FAIL_MARKERS):
+        return "failure"
+    if any(mark in blob for mark in KKTIX_BUSY_MARKERS):
+        return "busy"
+    return ""
 
 
 def is_charity_ticket_name(name: str) -> bool:

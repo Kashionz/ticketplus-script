@@ -106,6 +106,9 @@ def test_wait_sale_does_not_consume_max_retries(monkeypatch):
         def has_question_captcha(self):
             return False
 
+        def classify_alert(self):
+            return ""
+
         def open(self, url):
             return None
 
@@ -153,6 +156,9 @@ def test_failed_quantity_and_assign_sleep(monkeypatch):
 
         def has_question_captcha(self):
             return False
+
+        def classify_alert(self):
+            return ""
 
         def set_quantity(self, index, quantity):
             return False
@@ -205,6 +211,9 @@ def test_held_disabled_next_logs_prefill(monkeypatch):
         def has_question_captcha(self):
             return False
 
+        def classify_alert(self):
+            return ""
+
         def agree_terms(self):
             return True
 
@@ -223,3 +232,107 @@ def test_held_disabled_next_logs_prefill(monkeypatch):
     assert KktixFlow(engine).run() is False
     logged = " ".join(str(c) for c in engine._log_once.call_args_list)
     assert "kktix.com/account/prefills" in logged
+
+
+def _alert_engine(monkeypatch, url: str, kind: str, max_retries: int = 2):
+    engine = MagicMock()
+    engine.max_retries = max_retries
+    engine.refresh_interval = 0.01
+    engine.auto_agree = True
+    engine.wait_for_human = False
+    engine.config = _kktix_ticket()
+    engine._browser_still_open.return_value = True
+    engine._browser.driver = object()
+    engine._should_stop.return_value = False
+    refreshed = {"n": 0}
+
+    class FakeReg:
+        def __init__(self, driver, timeout=8):
+            self.current_url = url
+
+        def detect_sale_state(self):
+            return "on_sale"
+
+        def is_queue(self):
+            return False
+
+        def has_recaptcha(self):
+            return False
+
+        def has_question_captcha(self):
+            return False
+
+        def classify_alert(self):
+            return kind
+
+        def dismiss_failure_dialog(self):
+            return True
+
+        def list_rows(self):
+            return [KktixTicketRow(0, "全票", "3800", "on_sale", purchasable=True)]
+
+        def set_quantity(self, index, quantity):
+            return False
+
+        def has_invitation_field(self):
+            return False
+
+        def agree_terms(self):
+            return True
+
+        def open(self, url):
+            return None
+
+        def refresh(self):
+            refreshed["n"] += 1
+
+    fake_login = MagicMock()
+    fake_login.has_login_form.return_value = False
+    fake_checkout = MagicMock()
+    fake_checkout.has_card_field.return_value = False
+    fake_checkout.click_advance.return_value = False
+    monkeypatch.setattr("src.core.kktix_flow.KktixRegistrationPage", FakeReg)
+    monkeypatch.setattr("src.core.kktix_flow.KktixLoginPage", lambda *a, **k: fake_login)
+    monkeypatch.setattr("src.core.kktix_flow.KktixCheckoutPage", lambda *a, **k: fake_checkout)
+    return engine, refreshed
+
+
+def test_verification_alert_waits_without_refresh(monkeypatch):
+    url = "https://kktix.com/events/sbgr01/registrations/new"
+    engine, refreshed = _alert_engine(monkeypatch, url, "verification")
+    loops = {"n": 0}
+
+    def should_stop():
+        loops["n"] += 1
+        return loops["n"] > 5
+
+    engine._should_stop.side_effect = should_stop
+    assert KktixFlow(engine).run() is False
+    assert refreshed["n"] == 0
+    logged = " ".join(str(c) for c in engine._log_once.call_args_list)
+    assert "驗證" in logged
+
+
+def test_busy_alert_sleeps_without_refresh(monkeypatch):
+    url = "https://kktix.com/events/sbgr01/registrations/new"
+    engine, refreshed = _alert_engine(monkeypatch, url, "busy")
+    engine._should_stop.side_effect = [False, False, True]
+    assert KktixFlow(engine).run() is False
+    assert refreshed["n"] == 0
+    assert engine._sleep.called
+
+
+def test_csrf_refreshes_when_not_held(monkeypatch):
+    url = "https://kktix.com/events/sbgr01/registrations/new"
+    engine, refreshed = _alert_engine(monkeypatch, url, "csrf", max_retries=1)
+    engine._should_stop.return_value = False
+    assert KktixFlow(engine).run() is False
+    assert refreshed["n"] >= 1
+
+
+def test_csrf_does_not_refresh_when_held(monkeypatch):
+    url = "https://kktix.com/events/sbgr01/registrations/held1"
+    engine, refreshed = _alert_engine(monkeypatch, url, "csrf", max_retries=1)
+    engine._should_stop.side_effect = [False, False, True]
+    assert KktixFlow(engine).run() is False
+    assert refreshed["n"] == 0

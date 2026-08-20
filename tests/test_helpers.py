@@ -3,6 +3,7 @@ from pathlib import Path
 
 from src.models.ticket_config import TicketConfig
 from src.utils.helpers import (
+    classify_kktix_page_alert,
     area_keyword_matches,
     clamp_parallel_windows,
     classify_area_sale_text,
@@ -195,6 +196,7 @@ def test_ticket_config_rejects_too_many_tickets():
 def test_detect_platform_ticketplus_and_kktix():
     assert detect_platform("https://ticketplus.com.tw/activity/abc") == "ticketplus"
     assert detect_platform("https://kktix.com/events/sbgr01/registrations/new") == "kktix"
+    assert detect_platform("https://www.kktix.com/events/sbgr01/registrations/new") == "kktix"
     assert detect_platform("https://binliveco.kktix.cc/events/sbgr01") == "kktix"
     assert detect_platform("http://127.0.0.1:8765/activity/a" + "1" * 31) == "ticketplus"
     assert detect_platform("http://127.0.0.1:8765/events/mock-kktix/registrations/new") == "kktix"
@@ -244,3 +246,11 @@ def test_parse_kktix_sale_at_countdown_and_datetime():
     ts = parse_kktix_sale_at("全票 2026/09/05 12:00(+0800) ~ 2026/12/19 18:59(+0800)")
     assert ts == datetime(2026, 9, 5, 12, 0, tzinfo=taipei_tz()).timestamp()
     assert parse_kktix_sale_at("全票 TWD$3800") is None
+
+
+def test_classify_kktix_page_alert():
+    assert classify_kktix_page_alert("請先驗證電話號碼後再購票") == "verification"
+    assert classify_kktix_page_alert("驗證失敗，將更新頁面，請重新購票。") == "csrf"
+    assert classify_kktix_page_alert("目前沒有可以購買的票券。") == "failure"
+    assert classify_kktix_page_alert("流量管制中，請稍後再試。") == "busy"
+    assert classify_kktix_page_alert("全票 熱賣中") == ""
