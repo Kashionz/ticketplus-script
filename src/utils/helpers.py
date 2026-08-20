@@ -261,6 +261,18 @@ def is_cloudflare_challenge_text(text: str) -> bool:
     return any(mark.lower() in blob for mark in CLOUDFLARE_MARKERS)
 
 
+RECHOOSE_ALERT_MARKERS = (
+    "重新選票",
+    "座位亦不保留",
+    "訂單將先行取消",
+)
+
+
+def is_rechoose_alert_text(text: str) -> bool:
+    blob = text or ""
+    return any(mark in blob for mark in RECHOOSE_ALERT_MARKERS)
+
+
 def is_connection_refused(exc: BaseException) -> bool:
     text = str(exc).lower()
     return "err_connection_refused" in text or "connection refused" in text

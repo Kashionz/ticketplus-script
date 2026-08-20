@@ -257,6 +257,13 @@ def test_parse_kktix_sale_at_countdown_and_datetime():
     ).timestamp()
 
 
+def test_is_rechoose_alert_text():
+    from src.utils.helpers import is_rechoose_alert_text
+
+    assert is_rechoose_alert_text("目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？")
+    assert not is_rechoose_alert_text("查詢空位中")
+
+
 def test_is_cloudflare_challenge_text():
     from src.utils.helpers import is_cloudflare_challenge_text
 

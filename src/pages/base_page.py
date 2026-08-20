@@ -30,13 +30,49 @@ class BasePage:
 
     @property
     def current_url(self) -> str:
-        return self.driver.current_url
+        try:
+            return self.driver.current_url
+        except Exception as exc:
+            if "alert" in str(exc).lower():
+                self.dismiss_js_alert()
+                try:
+                    return self.driver.current_url
+                except Exception:
+                    return ""
+            return ""
+
+    def dismiss_js_alert(self) -> Optional[str]:
+        """關掉 JS alert。重新選票確認一律按取消，避免丟掉已配座位。"""
+        from ..utils.helpers import is_rechoose_alert_text
+
+        try:
+            alert = self.driver.switch_to.alert
+        except Exception:
+            return None
+        try:
+            text = alert.text or ""
+        except Exception:
+            text = ""
+        try:
+            if is_rechoose_alert_text(text):
+                alert.dismiss()
+                logger.info("已取消「重新選票」確認，保留目前座位")
+                return "rechoose"
+            alert.dismiss()
+            return text or "other"
+        except Exception:
+            return None
 
     def navigate_to(self, url: str) -> bool:
         try:
             self.driver.get(url)
             return True
         except Exception as exc:
+            if "alert" in str(exc).lower():
+                kind = self.dismiss_js_alert()
+                if kind == "rechoose":
+                    logger.warning("導頁會取消訂單，已按取消並停在原頁")
+                    return False
             logger.debug("導航失敗: %s", exc)
             return False
 
@@ -44,6 +80,9 @@ class BasePage:
         try:
             self.driver.refresh()
         except Exception as exc:
+            if "alert" in str(exc).lower():
+                self.dismiss_js_alert()
+                return
             logger.debug("重新整理失敗: %s", exc)
 
     def wait_seconds(self, seconds: float) -> None:

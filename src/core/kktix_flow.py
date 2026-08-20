@@ -51,6 +51,7 @@ class KktixFlow:
         self._reg: Optional[KktixRegistrationPage] = None
         self._login: Optional[KktixLoginPage] = None
         self._checkout: Optional[KktixCheckoutPage] = None
+        self._seats_locked = False
 
     def run(self) -> bool:
         e = self.engine
@@ -72,6 +73,10 @@ class KktixFlow:
             if not e._browser_still_open():
                 return False
             e._state.retry_count = retries
+            dismiss = getattr(self._reg, "dismiss_js_alert", None)
+            if callable(dismiss) and dismiss() == "rechoose":
+                self._seats_locked = True
+                e._log_once("kktix-keep-seats", "已拒絕重新選票，保留目前座位，不再重選")
             url = self._reg.current_url
 
             if self._at_payment(url):
@@ -103,6 +108,12 @@ class KktixFlow:
                 retries += 1
                 continue
 
+            if self._seats_locked:
+                self._advance_held(url)
+                e._sleep(0.8)
+                retries += 1
+                continue
+
             if is_kktix_held_url(url):
                 self._advance_held(url)
                 e._sleep(0.8)
@@ -120,6 +131,11 @@ class KktixFlow:
 
             if self._reg.is_cloudflare_challenge() is True:
                 self._handle_human_gate()
+                continue
+            if self._seats_locked:
+                self._advance_held(url)
+                e._sleep(0.8)
+                retries += 1
                 continue
             e._log(f"未預期的頁面: {url}，回到購票頁")
             self._reg.open(self._registration_url())
@@ -223,6 +239,7 @@ class KktixFlow:
         e._update_state(step=BotStep.SUBMIT, message="確認座位並完成選位")
         result = self._checkout.confirm_assigned_seats()
         if result == "done":
+            self._seats_locked = True
             e._log("已點「完成選位」，等待進入填表")
             e._sleep(0.6)
             return True
@@ -379,6 +396,8 @@ class KktixFlow:
         assert self._reg
         url = self._reg.current_url
         if self._reg.is_cloudflare_challenge() is True:
+            return
+        if self._seats_locked:
             return
         if self._checkout and self._checkout.has_seat_confirm_ui() is True:
             return

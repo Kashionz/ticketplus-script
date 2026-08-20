@@ -342,6 +342,67 @@ def test_csrf_refreshes_when_not_held(monkeypatch):
     assert refreshed["n"] >= 1
 
 
+def test_seats_locked_skips_ticket_reselect(monkeypatch):
+    engine = MagicMock()
+    engine.max_retries = 1
+    engine.refresh_interval = 0.01
+    engine.auto_agree = True
+    engine.wait_for_human = False
+    engine.config = _kktix_ticket()
+    engine._browser_still_open.return_value = True
+    engine._browser.driver = object()
+    engine._should_stop.return_value = False
+
+    class FakeReg:
+        def __init__(self, driver, timeout=8):
+            self.current_url = "https://kktix.com/events/sbgr01/registrations/new"
+
+        def detect_sale_state(self):
+            return "on_sale"
+
+        def is_queue(self):
+            return False
+
+        def has_recaptcha(self):
+            return False
+
+        def has_question_captcha(self):
+            return False
+
+        def is_cloudflare_challenge(self):
+            return False
+
+        def classify_alert(self):
+            return ""
+
+        def dismiss_js_alert(self):
+            return None
+
+        def list_rows(self):
+            raise AssertionError("must not re-select tickets after seats locked")
+
+        def agree_terms(self):
+            return True
+
+        def open(self, url):
+            raise AssertionError("must not reopen registration after seats locked")
+
+    fake_login = MagicMock()
+    fake_login.has_login_form.return_value = False
+    fake_checkout = MagicMock()
+    fake_checkout.has_card_field.return_value = False
+    fake_checkout.has_seat_confirm_ui.return_value = False
+    fake_checkout.click_advance.return_value = True
+    monkeypatch.setattr("src.core.kktix_flow.KktixRegistrationPage", FakeReg)
+    monkeypatch.setattr("src.core.kktix_flow.KktixLoginPage", lambda *a, **k: fake_login)
+    monkeypatch.setattr("src.core.kktix_flow.KktixCheckoutPage", lambda *a, **k: fake_checkout)
+
+    flow = KktixFlow(engine)
+    flow._seats_locked = True
+    assert flow.run() is False
+    fake_checkout.click_advance.assert_called()
+
+
 def test_confirm_seats_runs_before_held_advance(monkeypatch):
     engine = MagicMock()
     engine.max_retries = 1

@@ -77,6 +77,19 @@ def test_resolve_debugger_address_prefers_open_chrome(monkeypatch):
     assert resolve_debugger_address("", True) == ""
 
 
+def test_dismiss_rechoose_alert_cancels_not_accepts():
+    from src.pages.base_page import BasePage
+
+    alert = MagicMock()
+    alert.text = "目前的訂單將先行取消，座位亦不保留，您確定要重新選票嗎？"
+    driver = MagicMock()
+    driver.switch_to.alert = alert
+    page = BasePage(driver)
+    assert page.dismiss_js_alert() == "rechoose"
+    alert.dismiss.assert_called_once()
+    alert.accept.assert_not_called()
+
+
 def test_chrome_launch_hint_for_session_not_created():
     from src.core.browser import chrome_launch_hint
 
