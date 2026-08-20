@@ -68,6 +68,18 @@ def test_open_login_wait_page_survives_mock_connection_refused():
     driver.get.assert_called()
 
 
+def test_chrome_launch_hint_for_session_not_created():
+    from src.core.browser import chrome_launch_hint
+
+    hint = chrome_launch_hint(
+        RuntimeError("session not created: Chrome instance exited"),
+        ".chrome-profile",
+    )
+    assert "Chrome 啟動後立刻結束" in hint
+    assert ".chrome-profile" in hint
+    assert "open-chrome.bat" in hint
+
+
 def test_looks_like_dead_browser():
     bot = BotEngine(config=_ticket(), prefer_windows_chrome=False)
     assert bot._looks_like_dead_browser(RuntimeError("invalid session id"))

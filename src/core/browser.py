@@ -20,6 +20,20 @@ logger = logging.getLogger("ticketplus")
 HOME_URL = "https://ticketplus.com.tw/"
 
 
+def chrome_launch_hint(exc: BaseException, user_data_dir: Optional[str] = None) -> str:
+    text = str(exc)
+    blob = text.lower()
+    profile = user_data_dir or ".chrome-profile"
+    if "session not created" in blob or "chrome instance exited" in blob or "user data directory is already in use" in blob:
+        return (
+            "Chrome 啟動後立刻結束（session not created）。常見原因：\n"
+            f"1) 另一個 Chrome 佔用同一個設定檔「{profile}」，請先關掉所有 Chrome 再試\n"
+            f"2) 刪除專案裡的「{profile}」資料夾後重開（會清掉該檔的登入狀態）\n"
+            "3) 或雙擊 open-chrome.bat，在那個視窗登入後再按啟動瀏覽器"
+        )
+    return f"啟動 Chrome 失敗: {text}"
+
+
 class BrowserManager:
     def __init__(
         self,
@@ -84,9 +98,9 @@ class BrowserManager:
             options.add_argument(f"--user-data-dir={str(profile)}")
         if self.chrome_binary:
             options.binary_location = self.chrome_binary
-        options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
+        # Chrome 151+ 加上 enable-automation / AutomationControlled 會直接閃退
+        options.add_experimental_option("excludeSwitches", ["enable-logging"])
         options.add_experimental_option("useAutomationExtension", False)
-        options.add_argument("--disable-blink-features=AutomationControlled")
         return options
 
     def _service(self) -> Service:
@@ -133,7 +147,11 @@ class BrowserManager:
             return self._driver
 
         logger.info("啟動 Chrome...")
-        self._driver = self._connect(self._launch_options())
+        try:
+            self._driver = self._connect(self._launch_options())
+        except WebDriverException as exc:
+            hint = chrome_launch_hint(exc, self.user_data_dir)
+            raise RuntimeError(hint) from exc
         self._attached = False
         logger.info("Chrome 已啟動")
         return self._driver
