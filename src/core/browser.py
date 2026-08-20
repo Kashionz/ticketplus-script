@@ -13,7 +13,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.remote.webdriver import WebDriver
 
-from ..utils.windows_chrome import find_open_debugger, is_wsl
+from ..utils.windows_chrome import is_wsl, resolve_debugger_address
 
 logger = logging.getLogger("ticketplus")
 
@@ -127,17 +127,15 @@ class BrowserManager:
         if self._driver is not None:
             self.stop()
 
-        address = self.debugger_address
+        address = resolve_debugger_address(self.debugger_address, self.headless)
         if not address and self.prefer_windows_chrome and is_wsl() and not self.headless:
-            address = find_open_debugger()
-            if not address:
-                raise RuntimeError(
-                    "目前在 WSL，不會使用 Linux 內建 Chrome。\n"
-                    "請擇一：\n"
-                    "1) 在 Windows 雙擊 open-chrome.bat，登入後再按啟動瀏覽器\n"
-                    "2) 用 Windows 的 Python 執行：py -3 -m src.main\n"
-                    "3) 設定 browser.debugger_address: 127.0.0.1:9222"
-                )
+            raise RuntimeError(
+                "目前在 WSL，不會使用 Linux 內建 Chrome。\n"
+                "請擇一：\n"
+                "1) 在 Windows 雙擊 open-chrome.bat，登入後再按啟動瀏覽器\n"
+                "2) 用 Windows 的 Python 執行：py -3 -m src.main\n"
+                "3) 設定 browser.debugger_address: 127.0.0.1:9222"
+            )
 
         if address:
             logger.info("接上已開啟的 Chrome: %s", address)

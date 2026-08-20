@@ -68,6 +68,15 @@ def test_open_login_wait_page_survives_mock_connection_refused():
     driver.get.assert_called()
 
 
+def test_resolve_debugger_address_prefers_open_chrome(monkeypatch):
+    from src.utils.windows_chrome import resolve_debugger_address
+
+    monkeypatch.setattr("src.utils.windows_chrome.find_open_debugger", lambda port=9222: "127.0.0.1:9222")
+    assert resolve_debugger_address("", False) == "127.0.0.1:9222"
+    assert resolve_debugger_address("127.0.0.1:9333", False) == "127.0.0.1:9333"
+    assert resolve_debugger_address("", True) == ""
+
+
 def test_chrome_launch_hint_for_session_not_created():
     from src.core.browser import chrome_launch_hint
 
